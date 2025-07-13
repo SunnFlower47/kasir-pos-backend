@@ -1,0 +1,193 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\StoreProductRequest;
+use App\Http\Requests\UpdateProductRequest;
+use App\Models\Product;
+use App\Models\ProductStock;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Auth;
+
+class ProductController extends Controller
+{
+    /**
+     * Display a listing of the resource.
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $query = Product::with(['category', 'unit']);
+
+        // Search functionality
+        if ($request->has('search')) {
+            $search = $request->get('search');
+            $query->where(function ($q) use ($search) {
+                $q->where('name', 'like', "%{$search}%")
+                  ->orWhere('sku', 'like', "%{$search}%")
+                  ->orWhere('barcode', 'like', "%{$search}%");
+            });
+        }
+
+        // Filter by category
+        if ($request->has('category_id')) {
+            $query->where('category_id', $request->get('category_id'));
+        }
+
+        // Filter by active status
+        if ($request->has('is_active')) {
+            $query->where('is_active', $request->boolean('is_active'));
+        }
+
+        $perPage = $request->get('per_page', 15);
+        $products = $query->paginate($perPage);
+
+        // Add stock information for specific outlet if provided
+        if ($request->has('outlet_id') || $request->has('with_stock')) {
+            $user = Auth::user();
+            $outletId = $request->get('outlet_id') ?? $user->outlet_id ?? 1; // Default to outlet 1
+
+            $products->getCollection()->transform(function ($product) use ($outletId) {
+                $stock = $product->productStocks()->where('outlet_id', $outletId)->first();
+                $product->stock_quantity = $stock ? $stock->quantity : 0;
+                $product->is_low_stock = $product->stock_quantity <= $product->min_stock;
+                return $product;
+            });
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $products
+        ]);
+    }
+
+    /**
+     * Store a newly created resource in storage.
+     */
+    public function store(StoreProductRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        // Generate SKU if not provided
+        if (!isset($data['sku'])) {
+            $data['sku'] = 'PRD' . str_pad(Product::count() + 1, 6, '0', STR_PAD_LEFT);
+        }
+
+        $product = Product::create($data);
+
+        // Create initial stock for all outlets
+        $outlets = \App\Models\Outlet::where('is_active', true)->get();
+        foreach ($outlets as $outlet) {
+            ProductStock::create([
+                'product_id' => $product->id,
+                'outlet_id' => $outlet->id,
+                'quantity' => 0,
+            ]);
+        }
+
+        $product->load(['category', 'unit']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product created successfully',
+            'data' => $product
+        ], 201);
+    }
+
+    /**
+     * Display the specified resource.
+     */
+    public function show(Product $product): JsonResponse
+    {
+        $product->load(['category', 'unit', 'productStocks.outlet']);
+
+        return response()->json([
+            'success' => true,
+            'data' => $product
+        ]);
+    }
+
+    /**
+     * Update the specified resource in storage.
+     */
+    public function update(UpdateProductRequest $request, Product $product): JsonResponse
+    {
+        $data = $request->validated();
+
+        // Handle image upload if provided
+        if ($request->hasFile('image')) {
+            // Delete old image if exists
+            if ($product->image && Storage::disk('public')->exists($product->image)) {
+                Storage::disk('public')->delete($product->image);
+            }
+
+            $imagePath = $request->file('image')->store('products', 'public');
+            $data['image'] = $imagePath;
+        }
+
+        $product->update($data);
+        $product->load(['category', 'unit']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product updated successfully',
+            'data' => $product
+        ]);
+    }
+
+    /**
+     * Remove the specified resource from storage.
+     */
+    public function destroy(Product $product): JsonResponse
+    {
+        // Check if product has any transactions
+        if ($product->transactionItems()->exists()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete product that has transaction history'
+            ], 422);
+        }
+
+        $product->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Product deleted successfully'
+        ]);
+    }
+
+    /**
+     * Get product by barcode
+     */
+    public function getByBarcode(Request $request): JsonResponse
+    {
+        $request->validate([
+            'barcode' => 'required|string',
+            'outlet_id' => 'required|exists:outlets,id'
+        ]);
+
+        $product = Product::where('barcode', $request->barcode)
+                         ->where('is_active', true)
+                         ->with(['category', 'unit'])
+                         ->first();
+
+        if (!$product) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Product not found'
+            ], 404);
+        }
+
+        // Add stock information
+        $stock = $product->productStocks()->where('outlet_id', $request->outlet_id)->first();
+        $product->stock_quantity = $stock ? $stock->quantity : 0;
+        $product->is_low_stock = $product->stock_quantity <= $product->min_stock;
+
+        return response()->json([
+            'success' => true,
+            'data' => $product
+        ]);
+    }
+}

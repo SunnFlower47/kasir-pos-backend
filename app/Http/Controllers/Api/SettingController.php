@@ -1,0 +1,311 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\Setting;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Storage;
+
+class SettingController extends Controller
+{
+    /**
+     * Get all settings
+     */
+    public function index(): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'can') || !$user->can('settings.view')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $settings = Setting::all()->groupBy(function ($setting) {
+            $parts = explode('_', $setting->key);
+            return $parts[0] ?? 'general';
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $settings
+        ]);
+    }
+
+    /**
+     * Update settings
+     */
+    public function update(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'can') || !$user->can('settings.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $request->validate([
+            'settings' => 'required|array',
+            'settings.*.key' => 'required|string',
+            'settings.*.value' => 'nullable',
+            'settings.*.type' => 'required|in:string,integer,boolean,json',
+        ]);
+
+        foreach ($request->settings as $settingData) {
+            Setting::set($settingData['key'], $settingData['value'], $settingData['type']);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Settings updated successfully'
+        ]);
+    }
+
+    /**
+     * Get specific setting group
+     */
+    public function getGroup(string $group): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'can') || !$user->can('settings.view')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $settings = Setting::where('key', 'like', $group . '_%')->get();
+
+        return response()->json([
+            'success' => true,
+            'data' => $settings
+        ]);
+    }
+
+    /**
+     * Update specific setting group
+     */
+    public function updateGroup(Request $request, string $group): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'can') || !$user->can('settings.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        foreach ($request->all() as $key => $value) {
+            if (str_starts_with($key, $group . '_')) {
+                $type = match (true) {
+                    is_bool($value) => 'boolean',
+                    is_int($value) => 'integer',
+                    is_array($value) => 'json',
+                    default => 'string',
+                };
+                Setting::set($key, $value, $type);
+            }
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => ucfirst($group) . ' settings updated successfully'
+        ]);
+    }
+
+    /**
+     * Backup database
+     */
+    public function backup(): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        try {
+            $filename = 'backup-' . now()->format('Y-m-d-H-i-s') . '.sql';
+            $path = storage_path('app/backups/' . $filename);
+
+            // Create backups directory if it doesn't exist
+            if (!file_exists(dirname($path))) {
+                mkdir(dirname($path), 0755, true);
+            }
+
+            // For SQLite, we can simply copy the database file
+            if (config('database.default') === 'sqlite') {
+                $dbPath = database_path('database.sqlite');
+                if (file_exists($dbPath)) {
+                    copy($dbPath, storage_path('app/backups/database-' . now()->format('Y-m-d-H-i-s') . '.sqlite'));
+                }
+            } else {
+                // For MySQL/PostgreSQL, you would use mysqldump or pg_dump
+                // This is a simplified implementation
+                Artisan::call('backup:run');
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Database backup created successfully',
+                'data' => [
+                    'filename' => $filename,
+                    'created_at' => now(),
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to create backup: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get backup list
+     */
+    public function backups(): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $backupPath = storage_path('app/backups');
+        $backups = [];
+
+        if (is_dir($backupPath)) {
+            $files = scandir($backupPath);
+            foreach ($files as $file) {
+                if ($file !== '.' && $file !== '..' && (str_ends_with($file, '.sql') || str_ends_with($file, '.sqlite'))) {
+                    $filePath = $backupPath . '/' . $file;
+                    $backups[] = [
+                        'filename' => $file,
+                        'size' => filesize($filePath),
+                        'created_at' => date('Y-m-d H:i:s', filemtime($filePath)),
+                    ];
+                }
+            }
+        }
+
+        // Sort by creation date (newest first)
+        usort($backups, function ($a, $b) {
+            return strtotime($b['created_at']) - strtotime($a['created_at']);
+        });
+
+        return response()->json([
+            'success' => true,
+            'data' => $backups
+        ]);
+    }
+
+    /**
+     * Download backup file
+     */
+    public function downloadBackup(string $filename)
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $filePath = storage_path('app/backups/' . $filename);
+
+        if (!file_exists($filePath)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Backup file not found'
+            ], 404);
+        }
+
+        return response()->download($filePath);
+    }
+
+    /**
+     * Delete backup file
+     */
+    public function deleteBackup(string $filename): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $filePath = storage_path('app/backups/' . $filename);
+
+        if (!file_exists($filePath)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Backup file not found'
+            ], 404);
+        }
+
+        unlink($filePath);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Backup file deleted successfully'
+        ]);
+    }
+
+    /**
+     * Get system information
+     */
+    public function systemInfo(): JsonResponse
+    {
+        $user = Auth::user();
+        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $info = [
+            'app' => [
+                'name' => config('app.name'),
+                'version' => '1.0.0',
+                'environment' => config('app.env'),
+                'debug' => config('app.debug'),
+                'timezone' => config('app.timezone'),
+            ],
+            'database' => [
+                'connection' => config('database.default'),
+                'driver' => config('database.connections.' . config('database.default') . '.driver'),
+            ],
+            'server' => [
+                'php_version' => PHP_VERSION,
+                'laravel_version' => app()->version(),
+                'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
+                'memory_limit' => ini_get('memory_limit'),
+                'max_execution_time' => ini_get('max_execution_time'),
+            ],
+            'storage' => [
+                'disk_free_space' => disk_free_space('/'),
+                'disk_total_space' => disk_total_space('/'),
+            ],
+        ];
+
+        return response()->json([
+            'success' => true,
+            'data' => $info
+        ]);
+    }
+}
