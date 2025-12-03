@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Setting;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -17,8 +18,10 @@ class SettingController extends Controller
      */
     public function index(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('settings.view')) {
+        if (!$user || !$user->can('settings.view')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -41,8 +44,10 @@ class SettingController extends Controller
      */
     public function update(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('settings.edit')) {
+        if (!$user || !$user->can('settings.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -57,7 +62,27 @@ class SettingController extends Controller
         ]);
 
         foreach ($request->settings as $settingData) {
-            Setting::set($settingData['key'], $settingData['value'], $settingData['type']);
+            $key = $settingData['key'];
+            $value = $settingData['value'];
+
+            // Handle logo uploads - if value is base64, convert to file storage
+            if (in_array($key, ['company_logo', 'app_logo']) && $value) {
+                // Check if it's base64 image data
+                if (preg_match('/^data:image\/(\w+);base64,/', $value, $matches)) {
+                    try {
+                        $value = $this->saveBase64Image($value, $key);
+                    } catch (\Exception $e) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'Failed to save logo: ' . $e->getMessage()
+                        ], 500);
+                    }
+                }
+                // If it's a file path starting with 'logos/', it's already saved
+                // If it's empty/null, keep it as is
+            }
+
+            Setting::set($key, $value, $settingData['type']);
         }
 
         return response()->json([
@@ -67,12 +92,139 @@ class SettingController extends Controller
     }
 
     /**
+     * Upload logo file
+     */
+    public function uploadLogo(Request $request): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        if (!$user || !$user->can('settings.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $request->validate([
+            'logo' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:2048', // 2MB max
+            'type' => 'required|in:company_logo,app_logo',
+        ]);
+
+        try {
+            // Delete old logo if exists
+            $oldLogoPath = Setting::get($request->type, null);
+            if ($oldLogoPath && Storage::disk('public')->exists($oldLogoPath)) {
+                Storage::disk('public')->delete($oldLogoPath);
+            }
+
+            // Store new logo
+            $logoPath = $request->file('logo')->store('logos', 'public');
+
+            // Save path to settings
+            Setting::set($request->type, $logoPath, 'string');
+
+            // Get full URL
+            $logoUrl = url('storage/' . $logoPath);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Logo uploaded successfully',
+                'data' => [
+                    'path' => $logoPath,
+                    'url' => $logoUrl
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload logo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete logo
+     */
+    public function deleteLogo(Request $request, string $type): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        if (!$user || !$user->can('settings.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        if (!in_array($type, ['company_logo', 'app_logo'])) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Invalid logo type'
+            ], 400);
+        }
+
+        try {
+            $logoPath = Setting::get($type, null);
+            if ($logoPath && Storage::disk('public')->exists($logoPath)) {
+                Storage::disk('public')->delete($logoPath);
+            }
+
+            Setting::set($type, '', 'string');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Logo deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to delete logo: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Save base64 image to file storage
+     */
+    private function saveBase64Image(string $base64Data, string $key): string
+    {
+        // Extract image data and extension
+        if (!preg_match('/^data:image\/(\w+);base64,(.+)$/', $base64Data, $matches)) {
+            throw new \Exception('Invalid base64 image data');
+        }
+
+        $extension = $matches[1];
+        $imageData = base64_decode($matches[2]);
+
+        if ($imageData === false) {
+            throw new \Exception('Failed to decode base64 image data');
+        }
+
+        // Delete old logo if exists
+        $oldLogoPath = Setting::get($key, null);
+        if ($oldLogoPath && Storage::disk('public')->exists($oldLogoPath)) {
+            Storage::disk('public')->delete($oldLogoPath);
+        }
+
+        // Generate unique filename
+        $filename = $key . '_' . time() . '.' . $extension;
+        $logoPath = 'logos/' . $filename;
+
+        // Save to storage
+        Storage::disk('public')->put($logoPath, $imageData);
+
+        return $logoPath;
+    }
+
+    /**
      * Get specific setting group
      */
     public function getGroup(string $group): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('settings.view')) {
+        if (!$user || !$user->can('settings.view')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -92,8 +244,10 @@ class SettingController extends Controller
      */
     public function updateGroup(Request $request, string $group): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('settings.edit')) {
+        if (!$user || !$user->can('settings.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -123,8 +277,10 @@ class SettingController extends Controller
      */
     public function backup(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -174,8 +330,10 @@ class SettingController extends Controller
      */
     public function backups(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -215,8 +373,10 @@ class SettingController extends Controller
      */
     public function downloadBackup(string $filename)
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -240,8 +400,10 @@ class SettingController extends Controller
      */
     public function deleteBackup(string $filename): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -270,8 +432,10 @@ class SettingController extends Controller
      */
     public function systemInfo(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

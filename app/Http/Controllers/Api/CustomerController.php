@@ -7,6 +7,8 @@ use App\Models\Customer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use App\Models\User;
 
 class CustomerController extends Controller
 {
@@ -51,13 +53,39 @@ class CustomerController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('customers.create')) {
+        if (!$user || !$user->can('customers.create')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
             ], 403);
         }
+
+        // Normalize level before validation
+        $data = $request->all();
+        if (isset($data['level']) && $data['level']) {
+            $levelMap = [
+                'bronze' => 'level1',
+                'silver' => 'level2',
+                'gold' => 'level3',
+                'platinum' => 'level4',
+            ];
+            // Map old format to new format
+            if (isset($levelMap[$data['level']])) {
+                $data['level'] = $levelMap[$data['level']];
+            }
+        }
+
+        // If level is not set or empty, default to level1
+        if (!isset($data['level']) || empty($data['level'])) {
+            $data['level'] = 'level1';
+        }
+
+        Log::info('Creating customer with data:', ['level' => $data['level'], 'all_data' => $data]);
+
+        $request->merge($data);
 
         $request->validate([
             'name' => 'required|string|max:255',
@@ -66,10 +94,11 @@ class CustomerController extends Controller
             'address' => 'nullable|string',
             'birth_date' => 'nullable|date',
             'gender' => 'nullable|in:male,female',
-            'level' => 'nullable|in:silver,gold,platinum',
+            'level' => 'required|in:level1,level2,level3,level4',
+            'is_active' => 'nullable|boolean',
         ]);
 
-        $customer = Customer::create($request->all());
+        $customer = Customer::create($data);
 
         return response()->json([
             'success' => true,
@@ -98,13 +127,39 @@ class CustomerController extends Controller
      */
     public function update(Request $request, Customer $customer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('customers.edit')) {
+        if (!$user || !$user->can('customers.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
             ], 403);
         }
+
+        // Normalize level before validation
+        $data = $request->all();
+        if (isset($data['level']) && $data['level']) {
+            $levelMap = [
+                'bronze' => 'level1',
+                'silver' => 'level2',
+                'gold' => 'level3',
+                'platinum' => 'level4',
+            ];
+            // Map old format to new format
+            if (isset($levelMap[$data['level']])) {
+                $data['level'] = $levelMap[$data['level']];
+            }
+        }
+
+        // If level is not set, keep existing level
+        if (!isset($data['level']) || empty($data['level'])) {
+            $data['level'] = $customer->level;
+        }
+
+        Log::info('Updating customer with data:', ['customer_id' => $customer->id, 'level' => $data['level'], 'all_data' => $data]);
+
+        $request->merge($data);
 
         $request->validate([
             'name' => 'required|string|max:255',
@@ -113,10 +168,11 @@ class CustomerController extends Controller
             'address' => 'nullable|string',
             'birth_date' => 'nullable|date',
             'gender' => 'nullable|in:male,female',
-            'level' => 'nullable|in:silver,gold,platinum',
+            'level' => 'required|in:level1,level2,level3,level4',
+            'is_active' => 'nullable|boolean',
         ]);
 
-        $customer->update($request->all());
+        $customer->update($data);
 
         return response()->json([
             'success' => true,
@@ -130,8 +186,10 @@ class CustomerController extends Controller
      */
     public function destroy(Customer $customer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('customers.delete')) {
+        if (!$user || !$user->can('customers.delete')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -159,8 +217,10 @@ class CustomerController extends Controller
      */
     public function addLoyaltyPoints(Request $request, Customer $customer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('customers.edit')) {
+        if (!$user || !$user->can('customers.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -189,8 +249,10 @@ class CustomerController extends Controller
      */
     public function redeemLoyaltyPoints(Request $request, Customer $customer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('customers.edit')) {
+        if (!$user || !$user->can('customers.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

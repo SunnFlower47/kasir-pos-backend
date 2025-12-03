@@ -60,14 +60,23 @@ class AuditLogMiddleware
         // Extract model information from path
         $modelInfo = $this->extractModelInfo($path);
 
+        // Capture new values from request (for creates and updates)
+        $newValues = null;
+        if ($method === 'POST' || $method === 'PUT' || $method === 'PATCH') {
+            $newValues = $request->except(['password', 'password_confirmation']);
+        }
+
+        // Note: old_values cannot be captured in middleware because it runs after the update
+        // For proper old_values tracking, consider using Eloquent Observers
+        $oldValues = null;
+
         try {
             AuditLog::create([
                 'model_type' => $modelInfo['type'] ?? null,
                 'model_id' => $modelInfo['id'] ?? null,
                 'event' => $event,
-                'old_values' => null, // Could be enhanced to capture old values
-                'new_values' => $method === 'POST' || $method === 'PUT' || $method === 'PATCH' ?
-                    $request->except(['password', 'password_confirmation']) : null,
+                'old_values' => $oldValues, // Will be null for now
+                'new_values' => $newValues,
                 'user_id' => $user->id,
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
@@ -131,10 +140,12 @@ class AuditLogMiddleware
             'suppliers' => 'App\\Models\\Supplier',
             'transactions' => 'App\\Models\\Transaction',
             'purchases' => 'App\\Models\\Purchase',
+            'expenses' => 'App\\Models\\Expense',
             'outlets' => 'App\\Models\\Outlet',
             'users' => 'App\\Models\\User',
             'stocks' => 'App\\Models\\ProductStock',
             'stock-transfers' => 'App\\Models\\StockTransfer',
+            'promotions' => 'App\\Models\\Promotion',
         ];
 
         return $mapping[$resource] ?? null;

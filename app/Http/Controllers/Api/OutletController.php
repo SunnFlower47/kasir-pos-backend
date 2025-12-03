@@ -10,6 +10,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use App\Models\User;
 
 class OutletController extends Controller
 {
@@ -18,8 +20,10 @@ class OutletController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('outlets.view')) {
+        if (!$user || !$user->can('outlets.view')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -70,8 +74,10 @@ class OutletController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('outlets.create')) {
+        if (!$user || !$user->can('outlets.create')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -84,6 +90,8 @@ class OutletController extends Controller
             'address' => 'nullable|string',
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email',
+            'website' => 'nullable|string|max:255',
+            'npwp' => 'nullable|string|max:50',
             'is_active' => 'boolean',
         ]);
 
@@ -123,39 +131,73 @@ class OutletController extends Controller
      */
     public function show(Outlet $outlet): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('outlets.view')) {
+        if (!$user || !$user->can('outlets.view')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
             ], 403);
         }
 
-        $outlet->load(['users', 'productStocks.product']);
+        $outlet->load([
+            'users:id,name,email,is_active,outlet_id',
+            'productStocks:id,product_id,outlet_id,quantity'
+        ]);
 
-        // Add detailed statistics
+        // Optimize statistics with aggregated queries instead of multiple count() calls
+        // This reduces 8 queries to 3 queries (66% reduction)
+
+        // Users statistics (single query)
+        $userStats = DB::table('users')
+            ->selectRaw('
+                COUNT(*) as users_count,
+                SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_users_count
+            ')
+            ->where('outlet_id', $outlet->id)
+            ->first();
+
+        // Transactions statistics (single query) - Database agnostic
+        $todayStart = now()->startOfDay()->toDateTimeString();
+        $todayEnd = now()->endOfDay()->toDateTimeString();
+        $monthStart = now()->startOfMonth()->toDateTimeString();
+        $monthEnd = now()->endOfMonth()->toDateTimeString();
+
+        $transactionStats = DB::table('transactions')
+            ->selectRaw('
+                COUNT(*) as transactions_count,
+                SUM(CASE WHEN transaction_date >= ? AND transaction_date <= ? THEN 1 ELSE 0 END) as transactions_today,
+                SUM(CASE WHEN transaction_date >= ? AND transaction_date <= ? AND status = "completed"
+                    THEN total_amount ELSE 0 END) as revenue_today,
+                SUM(CASE WHEN transaction_date >= ? AND transaction_date <= ? AND status = "completed"
+                    THEN total_amount ELSE 0 END) as revenue_this_month
+            ', [$todayStart, $todayEnd, $todayStart, $todayEnd, $monthStart, $monthEnd])
+            ->where('outlet_id', $outlet->id)
+            ->first();
+
+        // Product stocks statistics (single query)
+        $stockStats = DB::table('product_stocks')
+            ->join('products', 'product_stocks.product_id', '=', 'products.id')
+            ->selectRaw('
+                COUNT(*) as products_count,
+                SUM(CASE WHEN product_stocks.quantity <= products.min_stock THEN 1 ELSE 0 END) as low_stock_products,
+                SUM(product_stocks.quantity * products.purchase_price) as total_stock_value
+            ')
+            ->where('product_stocks.outlet_id', $outlet->id)
+            ->first();
+
+        // Combine all statistics
         $outlet->detailed_stats = [
-            'users_count' => $outlet->users()->count(),
-            'active_users_count' => $outlet->users()->where('is_active', true)->count(),
-            'transactions_count' => $outlet->transactions()->count(),
-            'transactions_today' => $outlet->transactions()->whereDate('created_at', today())->count(),
-            'revenue_today' => $outlet->transactions()
-                ->whereDate('created_at', today())
-                ->where('status', 'completed')
-                ->sum('total_amount'),
-            'revenue_this_month' => $outlet->transactions()
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->where('status', 'completed')
-                ->sum('total_amount'),
-            'products_count' => $outlet->productStocks()->count(),
-            'low_stock_products' => $outlet->productStocks()
-                ->join('products', 'product_stocks.product_id', '=', 'products.id')
-                ->whereRaw('product_stocks.quantity <= products.min_stock')
-                ->count(),
-            'total_stock_value' => $outlet->productStocks()
-                ->join('products', 'product_stocks.product_id', '=', 'products.id')
-                ->sum(DB::raw('product_stocks.quantity * products.purchase_price')),
+            'users_count' => (int) ($userStats->users_count ?? 0),
+            'active_users_count' => (int) ($userStats->active_users_count ?? 0),
+            'transactions_count' => (int) ($transactionStats->transactions_count ?? 0),
+            'transactions_today' => (int) ($transactionStats->transactions_today ?? 0),
+            'revenue_today' => (float) ($transactionStats->revenue_today ?? 0),
+            'revenue_this_month' => (float) ($transactionStats->revenue_this_month ?? 0),
+            'products_count' => (int) ($stockStats->products_count ?? 0),
+            'low_stock_products' => (int) ($stockStats->low_stock_products ?? 0),
+            'total_stock_value' => (float) ($stockStats->total_stock_value ?? 0),
         ];
 
         return response()->json([
@@ -169,8 +211,10 @@ class OutletController extends Controller
      */
     public function update(Request $request, Outlet $outlet): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('outlets.edit')) {
+        if (!$user || !$user->can('outlets.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -183,6 +227,8 @@ class OutletController extends Controller
             'address' => 'nullable|string',
             'phone' => 'nullable|string|max:20',
             'email' => 'nullable|email',
+            'website' => 'nullable|string|max:255',
+            'npwp' => 'nullable|string|max:50',
             'is_active' => 'boolean',
         ]);
 
@@ -200,8 +246,10 @@ class OutletController extends Controller
      */
     public function destroy(Outlet $outlet): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('outlets.delete')) {
+        if (!$user || !$user->can('outlets.delete')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -230,6 +278,55 @@ class OutletController extends Controller
             'success' => true,
             'message' => 'Outlet deleted successfully'
         ]);
+    }
+
+    /**
+     * Upload outlet logo
+     */
+    public function uploadLogo(Request $request, Outlet $outlet): JsonResponse
+    {
+        /** @var User $user */
+        $user = Auth::user();
+        if (!$user || !$user->can('outlets.edit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        $request->validate([
+            'logo' => 'required|image|mimes:jpeg,png,jpg,gif,webp|max:2048', // 2MB max
+        ]);
+
+        try {
+            // Delete old logo if exists
+            if ($outlet->logo && Storage::disk('public')->exists($outlet->logo)) {
+                Storage::disk('public')->delete($outlet->logo);
+            }
+
+            // Store new logo
+            $logoPath = $request->file('logo')->store('logos/outlets', 'public');
+
+            // Update outlet with logo path
+            $outlet->update(['logo' => $logoPath]);
+
+            // Get full URL
+            $logoUrl = url('storage/' . $logoPath);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Outlet logo uploaded successfully',
+                'data' => [
+                    'path' => $logoPath,
+                    'url' => $logoUrl
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to upload logo: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

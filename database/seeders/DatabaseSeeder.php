@@ -19,11 +19,13 @@ class DatabaseSeeder extends Seeder
             CategoryUnitSeeder::class,     // Required: Categories and units
             RolePermissionSeeder::class,   // Required: User roles and permissions
             SettingSeeder::class,          // Required: System settings
-            // ProductSeeder::class,       // Disabled: We'll test with empty products
-            // SupplierCustomerSeeder::class, // Disabled: We'll test with empty data
+            SupplierSeeder::class,         // Suppliers for purchase flows
+            DemoDataSeeder::class,         // Core products, stocks, customers
+            TransactionSeeder::class,      // Sample transactions for reports
         ]);
 
-        // Create admin user for testing
+        // Ensure a fallback admin user exists for legacy tests
+        if (!User::where('email', 'admin@test.com')->exists()) {
         $adminUser = User::create([
             'name' => 'Admin Test',
             'email' => 'admin@test.com',
@@ -34,5 +36,6 @@ class DatabaseSeeder extends Seeder
 
         // Assign Super Admin role using Spatie Permission
         $adminUser->assignRole('Super Admin');
+        }
     }
 }

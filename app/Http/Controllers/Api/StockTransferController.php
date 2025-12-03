@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
 
 class StockTransferController extends Controller
 {
@@ -58,8 +59,10 @@ class StockTransferController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.transfer')) {
+        if (!$user || !$user->can('stocks.transfer')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -143,8 +146,10 @@ class StockTransferController extends Controller
      */
     public function approve(Request $request, StockTransfer $stockTransfer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.transfer')) {
+        if (!$user || !$user->can('stocks.transfer')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -225,8 +230,10 @@ class StockTransferController extends Controller
      */
     public function cancel(StockTransfer $stockTransfer): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.transfer')) {
+        if (!$user || !$user->can('stocks.transfer')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

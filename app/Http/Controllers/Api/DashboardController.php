@@ -24,6 +24,8 @@ class DashboardController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         $userOutletId = $user->outlet_id;
 
@@ -62,27 +64,169 @@ class DashboardController extends Controller
             'filtered_outlet_id' => $effectiveOutletId,
         ];
 
-        // Transaction statistics
-        $transactionQuery = Transaction::where('status', 'completed');
+        // Transaction statistics - use simpler queries for better reliability
+        $completedQuery = Transaction::where('status', 'completed');
+        $refundedQuery = Transaction::where('status', 'refunded');
+
         if ($effectiveOutletId) {
-            $transactionQuery->where('outlet_id', $effectiveOutletId);
+            $completedQuery->where('outlet_id', $effectiveOutletId);
+            $refundedQuery->where('outlet_id', $effectiveOutletId);
         }
 
+        // Use date strings for comparison (more compatible)
+        $todayStart = $today->startOfDay()->toDateTimeString();
+        $todayEnd = $today->endOfDay()->toDateTimeString();
+        $thisMonthStart = $thisMonth->startOfDay()->toDateTimeString();
+        $lastMonthStart = $lastMonth->startOfDay()->toDateTimeString();
+
+        // Debug: Check if we have any transactions at all
+        $totalCompleted = (clone $completedQuery)->count();
+        \Illuminate\Support\Facades\Log::info('Dashboard query check', [
+            'effectiveOutletId' => $effectiveOutletId,
+            'totalCompleted' => $totalCompleted,
+            'todayStart' => $todayStart,
+            'todayEnd' => $todayEnd,
+        ]);
+
+        // Completed transactions stats - Use separate queries for better reliability
+        try {
+            // Today's stats
+            $todayCompleted = (clone $completedQuery)
+                ->whereBetween('transaction_date', [$todayStart, $todayEnd])
+                ->get();
+            $transactionsToday = $todayCompleted->count();
+            $revenueToday = $todayCompleted->sum('total_amount');
+
+            // This month's stats
+            $thisMonthCompleted = (clone $completedQuery)
+                ->where('transaction_date', '>=', $thisMonthStart)
+                ->get();
+            $transactionsThisMonth = $thisMonthCompleted->count();
+            $revenueThisMonth = $thisMonthCompleted->sum('total_amount');
+
+            // Last month's stats
+            $lastMonthCompleted = (clone $completedQuery)
+                ->whereBetween('transaction_date', [$lastMonthStart, $thisMonthStart])
+                ->get();
+            $revenueLastMonth = $lastMonthCompleted->sum('total_amount');
+
+            $completedStats = (object)[
+                'transactions_today' => $transactionsToday,
+                'revenue_today' => (float) $revenueToday,
+                'transactions_this_month' => $transactionsThisMonth,
+                'revenue_this_month' => (float) $revenueThisMonth,
+                'revenue_last_month' => (float) $revenueLastMonth,
+            ];
+
+            \Illuminate\Support\Facades\Log::info('Completed stats calculated', [
+                'transactions_today' => $transactionsToday,
+                'revenue_today' => $revenueToday,
+            ]);
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error fetching completed stats', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            $completedStats = null;
+        }
+
+        // Refunded transactions stats - Use separate queries for better reliability
+        try {
+            // Today's refunds
+            $todayRefunded = (clone $refundedQuery)
+                ->whereBetween('transaction_date', [$todayStart, $todayEnd])
+                ->sum('total_amount');
+
+            // This month's refunds
+            $thisMonthRefunded = (clone $refundedQuery)
+                ->where('transaction_date', '>=', $thisMonthStart)
+                ->sum('total_amount');
+
+            // Last month's refunds
+            $lastMonthRefunded = (clone $refundedQuery)
+                ->whereBetween('transaction_date', [$lastMonthStart, $thisMonthStart])
+                ->sum('total_amount');
+
+            $refundedStats = (object)[
+                'refunds_today' => (float) $todayRefunded,
+                'refunds_this_month' => (float) $thisMonthRefunded,
+                'refunds_last_month' => (float) $lastMonthRefunded,
+            ];
+        } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Error fetching refunded stats', ['error' => $e->getMessage()]);
+            $refundedStats = null;
+        }
+
+        // Ensure we have valid objects with default values
+        if (!$completedStats) {
+            $completedStats = (object)[
+                'transactions_today' => 0,
+                'revenue_today' => 0,
+                'transactions_this_month' => 0,
+                'revenue_this_month' => 0,
+                'revenue_last_month' => 0,
+            ];
+        }
+
+        if (!$refundedStats) {
+            $refundedStats = (object)[
+                'refunds_today' => 0,
+                'refunds_this_month' => 0,
+                'refunds_last_month' => 0,
+            ];
+        }
+
+        // Convert to arrays and merge
+        $completedArray = (array) $completedStats;
+        $refundedArray = (array) $refundedStats;
+
+        // Ensure all keys exist
+        $completedArray['transactions_today'] = $completedArray['transactions_today'] ?? 0;
+        $completedArray['revenue_today'] = $completedArray['revenue_today'] ?? 0;
+        $completedArray['transactions_this_month'] = $completedArray['transactions_this_month'] ?? 0;
+        $completedArray['revenue_this_month'] = $completedArray['revenue_this_month'] ?? 0;
+        $completedArray['revenue_last_month'] = $completedArray['revenue_last_month'] ?? 0;
+
+        $refundedArray['refunds_today'] = $refundedArray['refunds_today'] ?? 0;
+        $refundedArray['refunds_this_month'] = $refundedArray['refunds_this_month'] ?? 0;
+        $refundedArray['refunds_last_month'] = $refundedArray['refunds_last_month'] ?? 0;
+
+        $transactionStatsRaw = (object) array_merge($completedArray, $refundedArray);
+
+        // Log raw stats for debugging
+        \Illuminate\Support\Facades\Log::info('Dashboard raw stats', [
+            'completedStats' => $completedArray,
+            'refundedStats' => $refundedArray,
+            'merged' => (array) $transactionStatsRaw
+        ]);
+
+        // Ensure numeric values (handle NULL from database)
+        $revenueToday = (float) ($transactionStatsRaw->revenue_today ?? 0);
+        $refundsToday = (float) ($transactionStatsRaw->refunds_today ?? 0);
+        $revenueThisMonth = (float) ($transactionStatsRaw->revenue_this_month ?? 0);
+        $refundsThisMonth = (float) ($transactionStatsRaw->refunds_this_month ?? 0);
+        $revenueLastMonth = (float) ($transactionStatsRaw->revenue_last_month ?? 0);
+        $refundsLastMonth = (float) ($transactionStatsRaw->refunds_last_month ?? 0);
+
         $transactionStats = [
-            'transactions_today' => (clone $transactionQuery)->whereDate('transaction_date', $today)->count(),
-            'revenue_today' => (clone $transactionQuery)->whereDate('transaction_date', $today)->sum('total_amount'),
-            'transactions_this_month' => (clone $transactionQuery)->whereDate('transaction_date', '>=', $thisMonth)->count(),
-            'revenue_this_month' => (clone $transactionQuery)->whereDate('transaction_date', '>=', $thisMonth)->sum('total_amount'),
-            'revenue_last_month' => (clone $transactionQuery)
-                ->whereBetween('transaction_date', [$lastMonth, $thisMonth])
-                ->sum('total_amount'),
+            'transactions_today' => (int) ($transactionStatsRaw->transactions_today ?? 0),
+            'revenue_today' => $revenueToday,
+            'refunds_today' => $refundsToday,
+            'net_revenue_today' => $revenueToday - $refundsToday,
+            'transactions_this_month' => (int) ($transactionStatsRaw->transactions_this_month ?? 0),
+            'revenue_this_month' => $revenueThisMonth,
+            'refunds_this_month' => $refundsThisMonth,
+            'net_revenue_this_month' => $revenueThisMonth - $refundsThisMonth,
+            'revenue_last_month' => $revenueLastMonth,
+            'refunds_last_month' => $refundsLastMonth,
+            'net_revenue_last_month' => $revenueLastMonth - $refundsLastMonth,
         ];
 
-        // Calculate growth percentage
+        // Calculate growth percentage (using net_revenue)
         $revenueGrowth = 0;
-        if ($transactionStats['revenue_last_month'] > 0) {
-            $revenueGrowth = (($transactionStats['revenue_this_month'] - $transactionStats['revenue_last_month'])
-                / $transactionStats['revenue_last_month']) * 100;
+        if ($transactionStats['net_revenue_last_month'] > 0) {
+            $revenueGrowth = (($transactionStats['net_revenue_this_month'] - $transactionStats['net_revenue_last_month'])
+                / $transactionStats['net_revenue_last_month']) * 100;
         }
 
         // Stock statistics
@@ -163,38 +307,45 @@ class DashboardController extends Controller
             $date = now()->subDays($i)->toDateString();
             $salesQuery = Transaction::where('status', 'completed')
                 ->whereDate('transaction_date', $date);
-            if ($userOutletId) {
-                $salesQuery->where('outlet_id', $userOutletId);
+            if ($effectiveOutletId) {
+                $salesQuery->where('outlet_id', $effectiveOutletId);
             }
 
             $salesChartData[] = [
                 'date' => $date,
-                'revenue' => $salesQuery->sum('total_amount'),
-                'transactions' => $salesQuery->count(),
+                'revenue' => (float) ($salesQuery->sum('total_amount') ?? 0),
+                'transactions' => (int) ($salesQuery->count() ?? 0),
             ];
         }
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'stats' => $stats,
+            // Log transaction stats for debugging
+            \Illuminate\Support\Facades\Log::info('Dashboard transaction stats', [
                 'transaction_stats' => $transactionStats,
-                'stock_stats' => $stockStats,
-                'revenue_growth' => round($revenueGrowth, 2),
-                'recent_transactions' => $recentTransactions,
-                'top_products' => $topProducts,
-                'low_stock_products' => $lowStockProducts,
-                'out_of_stock_products' => $outOfStockProducts,
-                'sales_chart_data' => $salesChartData,
-                'user_outlet' => $effectiveOutletId ? Outlet::find($effectiveOutletId) : null,
-                'available_outlets' => $isGlobalAccess ? Outlet::where('is_active', true)->get() : null,
-                'stock_alerts' => [
-                    'low_stock_count' => $lowStockProducts->count(),
-                    'out_of_stock_count' => $outOfStockProducts->count(),
-                    'total_alerts' => $lowStockProducts->count() + $outOfStockProducts->count(),
+                'revenue_today' => $transactionStats['revenue_today'],
+                'revenue_this_month' => $transactionStats['revenue_this_month'],
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'stats' => $stats,
+                    'transaction_stats' => $transactionStats,
+                    'stock_stats' => $stockStats,
+                    'revenue_growth' => round($revenueGrowth, 2),
+                    'recent_transactions' => $recentTransactions,
+                    'top_products' => $topProducts,
+                    'low_stock_products' => $lowStockProducts,
+                    'out_of_stock_products' => $outOfStockProducts,
+                    'sales_chart_data' => $salesChartData,
+                    'user_outlet' => $effectiveOutletId ? Outlet::find($effectiveOutletId) : null,
+                    'available_outlets' => $isGlobalAccess ? Outlet::where('is_active', true)->get() : null,
+                    'stock_alerts' => [
+                        'low_stock_count' => $lowStockProducts->count(),
+                        'out_of_stock_count' => $outOfStockProducts->count(),
+                        'total_alerts' => $lowStockProducts->count() + $outOfStockProducts->count(),
+                    ]
                 ]
-            ]
-        ]);
+            ]);
     }
 
     /**
@@ -202,8 +353,10 @@ class DashboardController extends Controller
      */
     public function outletComparison(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'hasRole') || !$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
+        if (!$user || !$user->hasRole(['Super Admin', 'Admin', 'Manager'])) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -212,12 +365,17 @@ class DashboardController extends Controller
 
         $period = $request->get('period', 'this_month'); // this_month, last_month, today, yesterday
 
-        $dateFilter = match($period) {
-            'today' => ['>=', today()],
-            'yesterday' => ['>=', now()->subDay()->startOfDay(), '<=', now()->subDay()->endOfDay()],
-            'this_month' => ['>=', now()->startOfMonth()],
-            'last_month' => ['>=', now()->subMonth()->startOfMonth(), '<=', now()->subMonth()->endOfMonth()],
-            default => ['>=', now()->startOfMonth()],
+        [$rangeStart, $rangeEnd] = match($period) {
+            'today' => [today()->toDateString(), today()->toDateString()],
+            'yesterday' => [
+                now()->subDay()->toDateString(),
+                now()->subDay()->toDateString()
+            ],
+            'last_month' => [
+                now()->subMonth()->startOfMonth()->toDateString(),
+                now()->subMonth()->endOfMonth()->toDateString()
+            ],
+            default => [now()->startOfMonth()->toDateString(), null],
         };
 
         $outlets = Outlet::where('is_active', true)->get();
@@ -226,10 +384,10 @@ class DashboardController extends Controller
         foreach ($outlets as $outlet) {
             $transactionQuery = $outlet->transactions()->where('status', 'completed');
 
-            if (count($dateFilter) === 2) {
-                $transactionQuery->where('transaction_date', $dateFilter[0], $dateFilter[1]);
+            if ($rangeEnd) {
+                $transactionQuery->whereBetween('transaction_date', [$rangeStart, $rangeEnd]);
             } else {
-                $transactionQuery->whereBetween('transaction_date', [$dateFilter[1], $dateFilter[2]]);
+                $transactionQuery->where('transaction_date', '>=', $rangeStart);
             }
 
             $comparison[] = [

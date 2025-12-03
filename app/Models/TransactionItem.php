@@ -15,6 +15,7 @@ class TransactionItem extends Model
         'product_id',
         'quantity',
         'unit_price',
+        'purchase_price',
         'discount_amount',
         'total_price',
     ];
@@ -23,8 +24,12 @@ class TransactionItem extends Model
     {
         return [
             'unit_price' => 'decimal:2',
+            'purchase_price' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'total_price' => 'decimal:2',
+            'quantity' => 'integer',
+            'transaction_id' => 'integer',
+            'product_id' => 'integer',
         ];
     }
 
@@ -49,6 +54,7 @@ class TransactionItem extends Model
      */
     public function calculateTotalPrice(): void
     {
-        $this->total_price = ($this->unit_price * $this->quantity) - $this->discount_amount;
+        $total = ($this->unit_price * $this->quantity) - $this->discount_amount;
+        $this->setAttribute('total_price', $total);
     }
 }

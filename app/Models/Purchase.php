@@ -73,6 +73,15 @@ class Purchase extends Model
     }
 
     /**
+     * Get the stock movements for the purchase.
+     */
+    public function stockMovements(): HasMany
+    {
+        return $this->hasMany(StockMovement::class, 'reference_id')
+                    ->where('reference_type', 'App\Models\Purchase');
+    }
+
+    /**
      * Generate unique invoice number
      */
     public static function generateInvoiceNumber(): string
@@ -93,8 +102,8 @@ class Purchase extends Model
      */
     public function calculateTotal(): void
     {
-        $this->subtotal = $this->purchaseItems->sum('total_price');
-        $this->total_amount = $this->subtotal + $this->tax_amount - $this->discount_amount;
-        $this->remaining_amount = $this->total_amount - $this->paid_amount;
+        $this->subtotal = (float) $this->purchaseItems->sum('total_price');
+        $this->total_amount = (float) ($this->subtotal + $this->tax_amount - $this->discount_amount);
+        $this->remaining_amount = (float) ($this->total_amount - $this->paid_amount);
     }
 }

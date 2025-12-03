@@ -52,6 +52,7 @@ class AuthController extends Controller
                     'is_active' => $user->is_active,
                     'outlet_id' => $user->outlet_id,
                     'outlet' => $user->outlet,
+                    'role' => $user->getRoleNames()->first() ?? '',
                     'roles' => $user->roles->map(function ($role) {
                         return [
                             'id' => $role->id,
@@ -107,6 +108,7 @@ class AuthController extends Controller
     public function profile(Request $request): JsonResponse
     {
         $user = $request->user();
+        $primaryRole = $user->getRoleNames()->first() ?? '';
 
         return response()->json([
             'success' => true,
@@ -120,6 +122,7 @@ class AuthController extends Controller
                     'is_active' => $user->is_active,
                     'outlet_id' => $user->outlet_id,
                     'outlet' => $user->outlet,
+                    'role' => $primaryRole,
                     'roles' => $user->roles->map(function ($role) {
                         return [
                             'id' => $role->id,

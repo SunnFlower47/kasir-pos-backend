@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use App\Models\User;
 
 class StockController extends Controller
 {
@@ -22,10 +23,14 @@ class StockController extends Controller
     {
         $request->validate([
             'outlet_id' => 'nullable|exists:outlets,id',
+            'product_id' => 'nullable|exists:products,id',
             'search' => 'nullable|string',
             'category_id' => 'nullable|exists:categories,id',
             'low_stock_only' => 'nullable|boolean',
         ]);
+
+        /** @var User $user */
+
 
         $user = Auth::user();
         $query = ProductStock::with(['product.category', 'product.unit', 'outlet']);
@@ -34,6 +39,12 @@ class StockController extends Controller
         if ($request->has('outlet_id') && $request->outlet_id) {
             $query->where('outlet_id', $request->outlet_id);
         }
+
+        // Filter by product if specified
+        if ($request->has('product_id') && $request->product_id) {
+            $query->where('product_id', $request->product_id);
+        }
+
         // Note: Removed automatic filtering by user outlet_id to allow viewing all outlets
         // Admin and super admin should be able to see all outlets when no filter is applied
 
@@ -81,8 +92,10 @@ class StockController extends Controller
      */
     public function adjust(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.adjustment')) {
+        if (!$user || !$user->can('stocks.adjustment')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -155,8 +168,10 @@ class StockController extends Controller
      */
     public function opname(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.adjustment')) {
+        if (!$user || !$user->can('stocks.adjustment')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -291,8 +306,10 @@ class StockController extends Controller
      */
     public function incoming(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.adjustment')) {
+        if (!$user || !$user->can('stocks.adjustment')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -365,8 +382,10 @@ class StockController extends Controller
      */
     public function transfer(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('stocks.transfer')) {
+        if (!$user || !$user->can('stocks.transfer')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -479,6 +498,8 @@ class StockController extends Controller
      */
     public function lowStockAlerts(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         $query = ProductStock::with(['product', 'outlet'])
                             ->whereRaw('quantity <= (SELECT min_stock FROM products WHERE products.id = product_stocks.product_id)')

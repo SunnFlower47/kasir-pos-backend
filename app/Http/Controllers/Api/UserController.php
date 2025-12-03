@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Spatie\Permission\Models\Role;
+use Spatie\Permission\Models\Permission;
 
 class UserController extends Controller
 {
@@ -18,6 +19,8 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         if (!$user || !$user->can('users.view')) {
             return response()->json([
@@ -76,6 +79,8 @@ class UserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         if (!$user || !$user->can('users.create')) {
             return response()->json([
@@ -126,6 +131,7 @@ class UserController extends Controller
      */
     public function show(User $user): JsonResponse
     {
+        /** @var User $authUser */
         $authUser = Auth::user();
         if (!$authUser || !$authUser->can('users.view')) {
             return response()->json([
@@ -148,6 +154,7 @@ class UserController extends Controller
      */
     public function update(Request $request, User $user): JsonResponse
     {
+        /** @var User $authUser */
         $authUser = Auth::user();
         if (!$authUser || !$authUser->can('users.edit')) {
             return response()->json([
@@ -202,6 +209,7 @@ class UserController extends Controller
      */
     public function destroy(User $user): JsonResponse
     {
+        /** @var User $authUser */
         $authUser = Auth::user();
         if (!$authUser || !$authUser->can('users.delete')) {
             return response()->json([
@@ -239,6 +247,8 @@ class UserController extends Controller
      */
     public function getRoles(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         if (!$user || !$user->can('users.view')) {
             return response()->json([
@@ -260,6 +270,7 @@ class UserController extends Controller
      */
     public function getPermissions(User $user): JsonResponse
     {
+        /** @var User $authUser */
         $authUser = Auth::user();
         if (!$authUser || !$authUser->can('users.view')) {
             return response()->json([
@@ -281,6 +292,8 @@ class UserController extends Controller
      */
     public function getAllPermissions(): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         if (!$user || !$user->can('users.view')) {
             return response()->json([
@@ -289,7 +302,7 @@ class UserController extends Controller
             ], 403);
         }
 
-        $permissions = \Spatie\Permission\Models\Permission::all();
+        $permissions = Permission::all();
 
         return response()->json([
             'success' => true,
@@ -302,6 +315,8 @@ class UserController extends Controller
      */
     public function updateRolePermissions(Request $request, $roleId): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
         if (!$user || !$user->can('users.edit')) {
             return response()->json([
@@ -315,8 +330,8 @@ class UserController extends Controller
             'permissions.*' => 'exists:permissions,id'
         ]);
 
-        $role = \Spatie\Permission\Models\Role::findOrFail($roleId);
-        $permissions = \Spatie\Permission\Models\Permission::whereIn('id', $request->permissions)->get();
+        $role = Role::findOrFail($roleId);
+        $permissions = Permission::whereIn('id', $request->permissions)->get();
 
         $role->syncPermissions($permissions);
 

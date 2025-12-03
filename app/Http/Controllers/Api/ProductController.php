@@ -11,6 +11,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Auth;
+use App\Models\User;
 
 class ProductController extends Controller
 {
@@ -19,7 +20,15 @@ class ProductController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Product::with(['category', 'unit']);
+        // Select only needed columns for better performance
+        $query = Product::select([
+            'id', 'name', 'sku', 'barcode', 'description', 'category_id', 'unit_id',
+            'purchase_price', 'selling_price', 'wholesale_price', 'min_stock',
+            'image', 'is_active', 'created_at', 'updated_at'
+        ])->with([
+            'category:id,name',
+            'unit:id,name'
+        ]);
 
         // Search functionality
         if ($request->has('search')) {
@@ -41,18 +50,30 @@ class ProductController extends Controller
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        $perPage = $request->get('per_page', 15);
-        $products = $query->paginate($perPage);
-
-        // Add stock information for specific outlet if provided
+        // Add stock information for specific outlet if provided (optimize with eager loading)
         if ($request->has('outlet_id') || $request->has('with_stock')) {
+            /** @var User $user */
             $user = Auth::user();
             $outletId = $request->get('outlet_id') ?? $user->outlet_id ?? 1; // Default to outlet 1
 
+            // Eager load product stocks for specific outlet to avoid N+1 query problem
+            $query->with(['productStocks' => function($q) use ($outletId) {
+                $q->select('id', 'product_id', 'outlet_id', 'quantity')
+                  ->where('outlet_id', $outletId);
+            }]);
+        }
+
+        $perPage = $request->get('per_page', 15);
+        $products = $query->paginate($perPage);
+
+        // Transform products to add stock info (already loaded, no additional queries)
+        if ($request->has('outlet_id') || $request->has('with_stock')) {
             $products->getCollection()->transform(function ($product) use ($outletId) {
-                $stock = $product->productStocks()->where('outlet_id', $outletId)->first();
+                $stock = $product->productStocks->first(); // Already loaded, no query needed
                 $product->stock_quantity = $stock ? $stock->quantity : 0;
                 $product->is_low_stock = $product->stock_quantity <= $product->min_stock;
+                // Remove productStocks relationship from response (already processed)
+                unset($product->productStocks);
                 return $product;
             });
         }

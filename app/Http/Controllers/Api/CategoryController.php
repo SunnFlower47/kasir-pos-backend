@@ -7,6 +7,7 @@ use App\Models\Category;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Models\User;
 
 class CategoryController extends Controller
 {
@@ -45,8 +46,10 @@ class CategoryController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('categories.create')) {
+        if (!$user || !$user->can('categories.create')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -89,8 +92,10 @@ class CategoryController extends Controller
      */
     public function update(Request $request, Category $category): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('categories.edit')) {
+        if (!$user || !$user->can('categories.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -118,8 +123,10 @@ class CategoryController extends Controller
      */
     public function destroy(Category $category): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('categories.delete')) {
+        if (!$user || !$user->can('categories.delete')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

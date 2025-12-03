@@ -31,13 +31,16 @@ class Transaction extends Model
     protected function casts(): array
     {
         return [
-            'transaction_date' => 'date',
+            'transaction_date' => 'datetime',
             'subtotal' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'tax_amount' => 'decimal:2',
             'total_amount' => 'decimal:2',
             'paid_amount' => 'decimal:2',
             'change_amount' => 'decimal:2',
+            'outlet_id' => 'integer',
+            'customer_id' => 'integer',
+            'user_id' => 'integer',
         ];
     }
 
@@ -95,7 +98,9 @@ class Transaction extends Model
     public function calculateTotal(): void
     {
         $this->subtotal = $this->transactionItems->sum('total_price');
-        $this->total_amount = $this->subtotal + $this->tax_amount - $this->discount_amount;
-        $this->change_amount = $this->paid_amount - $this->total_amount;
+        $total = $this->subtotal + $this->tax_amount - $this->discount_amount;
+        $this->setAttribute('total_amount', $total);
+        $change = $this->paid_amount - $this->total_amount;
+        $this->setAttribute('change_amount', $change);
     }
 }

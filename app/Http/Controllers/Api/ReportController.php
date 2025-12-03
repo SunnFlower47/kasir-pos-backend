@@ -4,16 +4,20 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Customer;
+// Expense model is used with fully qualified namespace to avoid route model binding conflicts
+// use App\Models\Expense;
 use App\Models\Product;
 use App\Models\Purchase;
 use App\Models\StockMovement;
 use App\Models\Transaction;
 use App\Models\TransactionItem;
+use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 // use Maatwebsite\Excel\Facades\Excel;
 // use Barryvdh\DomPDF\Facade\Pdf;
 
@@ -24,11 +28,20 @@ class ReportController extends Controller
      */
     public function sales(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('reports.sales')) {
+        if (!$user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized'
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
+        if (!$user->can('reports.sales')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized - Missing reports.sales permission'
             ], 403);
         }
 
@@ -39,16 +52,26 @@ class ReportController extends Controller
             'user_id' => 'nullable|exists:users,id',
             'payment_method' => 'nullable|in:cash,transfer,qris,e_wallet',
             'group_by' => 'nullable|in:day,week,month',
+            'show_all_data' => 'nullable|boolean',
         ]);
 
         $query = Transaction::with(['outlet', 'user', 'customer'])
             ->where('status', 'completed');
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
+        // Handle date filtering
+        if ($request->show_all_data) {
+            // Show all data without date filter
+            $dateFrom = null;
+            $dateTo = null;
+        } else {
+            // Set default date range if not provided (last 30 days)
+            $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+            $dateTo = $request->date_to ?? now()->format('Y-m-d');
+
+            // Apply date filter
             $query->whereBetween('transaction_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
         }
 
@@ -102,12 +125,24 @@ class ReportController extends Controller
             ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
             ->where('transactions.status', 'completed');
 
-            // Apply date filter if provided
-            if ($request->date_from && $request->date_to) {
+            // Apply date filter only if not showing all data
+            if (!$request->show_all_data && $dateFrom && $dateTo) {
                 $topProductsQuery->whereBetween('transactions.transaction_date', [
-                    $request->date_from . ' 00:00:00',
-                    $request->date_to . ' 23:59:59'
+                    $dateFrom . ' 00:00:00',
+                    $dateTo . ' 23:59:59'
                 ]);
+            }
+
+            if ($request->outlet_id) {
+                $topProductsQuery->where('transactions.outlet_id', $request->outlet_id);
+            }
+
+            if ($request->user_id) {
+                $topProductsQuery->where('transactions.user_id', $request->user_id);
+            }
+
+            if ($request->payment_method) {
+                $topProductsQuery->where('transactions.payment_method', $request->payment_method);
             }
 
             $topProducts = $topProductsQuery
@@ -119,59 +154,58 @@ class ReportController extends Controller
             // Get chart data (daily breakdown)
             $chartData = [];
 
-            if ($request->date_from && $request->date_to) {
-                $startDate = Carbon::parse($request->date_from);
-                $endDate = Carbon::parse($request->date_to);
-
-                for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
-                    $dayData = Transaction::where('status', 'completed')
-                        ->whereDate('transaction_date', $date->format('Y-m-d'))
-                        ->selectRaw('
-                            date(transaction_date) as date,
-                            COUNT(*) as transactions,
-                            COALESCE(SUM(total_amount), 0) as revenue
-                        ')
-                        ->first();
-
-                    $chartData[] = [
-                        'date' => $date->format('Y-m-d'),
-                        'transactions' => $dayData->transactions ?? 0,
-                        'revenue' => $dayData->revenue ?? 0
-                    ];
-                }
+            if ($request->show_all_data) {
+                // For all data, get last 30 days for chart
+                $startDate = now()->subDays(30);
+                $endDate = now();
             } else {
-                // If no date filter, get last 7 days of data
-                $endDate = Carbon::now();
-                $startDate = Carbon::now()->subDays(6);
+                $startDate = Carbon::parse($dateFrom);
+                $endDate = Carbon::parse($dateTo);
+            }
 
-                for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
-                    $dayData = Transaction::where('status', 'completed')
-                        ->whereDate('transaction_date', $date->format('Y-m-d'))
-                        ->selectRaw('
-                            date(transaction_date) as date,
-                            COUNT(*) as transactions,
-                            COALESCE(SUM(total_amount), 0) as revenue
-                        ')
-                        ->first();
+            for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+                $dayQuery = Transaction::where('status', 'completed')
+                    ->whereDate('transaction_date', $date->format('Y-m-d'));
 
-                    $chartData[] = [
-                        'date' => $date->format('Y-m-d'),
-                        'transactions' => $dayData->transactions ?? 0,
-                        'revenue' => $dayData->revenue ?? 0
-                    ];
+                // Apply same filters as main query
+                if ($request->outlet_id) {
+                    $dayQuery->where('outlet_id', $request->outlet_id);
                 }
+                if ($request->user_id) {
+                    $dayQuery->where('user_id', $request->user_id);
+                }
+                if ($request->payment_method) {
+                    $dayQuery->where('payment_method', $request->payment_method);
+                }
+
+                $dayData = $dayQuery->selectRaw('
+                        date(transaction_date) as date,
+                        COUNT(*) as transactions,
+                        COALESCE(SUM(total_amount), 0) as revenue
+                    ')
+                    ->first();
+
+                $chartData[] = [
+                    'date' => $date->format('Y-m-d'),
+                    'transactions' => $dayData->transactions ?? 0,
+                    'revenue' => $dayData->revenue ?? 0
+                ];
             }
 
             // Get customer and product counts
             $totalCustomers = Customer::count();
             $totalProducts = Product::count();
-            $customersWithTransactions = Transaction::whereBetween('transaction_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
-            ])
-            ->whereNotNull('customer_id')
-            ->distinct('customer_id')
-            ->count();
+            $customersQuery = Transaction::whereNotNull('customer_id');
+
+            // Apply date filter only if not showing all data
+            if (!$request->show_all_data && $dateFrom && $dateTo) {
+                $customersQuery->whereBetween('transaction_date', [
+                    $dateFrom . ' 00:00:00',
+                    $dateTo . ' 23:59:59'
+                ]);
+            }
+
+            $customersWithTransactions = $customersQuery->distinct('customer_id')->count();
 
             return response()->json([
                 'success' => true,
@@ -195,15 +229,19 @@ class ReportController extends Controller
         }
 
         // Regular detailed report
+        // Clone query for summary calculation before pagination
+        $summaryQuery = clone $query;
+
         $perPage = $request->get('per_page', 15);
         $transactions = $query->orderBy('transaction_date', 'desc')->paginate($perPage);
 
         $summary = [
-            'total_transactions' => $query->count(),
-            'total_revenue' => $query->sum('total_amount'),
-            'total_discount' => $query->sum('discount_amount'),
-            'total_tax' => $query->sum('tax_amount'),
-            'avg_transaction_value' => $query->avg('total_amount'),
+            'total_transactions' => $summaryQuery->count(),
+            'total_revenue' => $summaryQuery->sum('total_amount'),
+            'total_discount' => $summaryQuery->sum('discount_amount'),
+            'total_tax' => $summaryQuery->sum('tax_amount'),
+            'avg_transaction_value' => $summaryQuery->avg('total_amount'),
+            'customers_with_transactions' => $summaryQuery->whereNotNull('customer_id')->distinct('customer_id')->count(),
         ];
 
         return response()->json([
@@ -220,11 +258,20 @@ class ReportController extends Controller
      */
     public function purchases(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('reports.purchases')) {
+        if (!$user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized'
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
+        if (!$user->can('reports.purchases')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized - Missing reports.purchases permission'
             ], 403);
         }
 
@@ -234,34 +281,52 @@ class ReportController extends Controller
             'outlet_id' => 'nullable|exists:outlets,id',
             'supplier_id' => 'nullable|exists:suppliers,id',
             'status' => 'nullable|in:pending,partial,paid,cancelled',
+            'show_all_data' => 'nullable|boolean',
         ]);
 
-        $query = Purchase::with(['outlet', 'supplier', 'user']);
+        $showAllData = $request->boolean('show_all_data');
+        $includeAllStatus = $request->boolean('include_all_status');
+        $statusFilter = $request->status;
+        $effectiveStatus = ($includeAllStatus && $statusFilter) ? $statusFilter : 'paid';
 
-        // Only include paid purchases in reports (cancelled purchases should not appear)
-        $query->where('status', 'paid');
+        // Handle date filtering
+        if ($showAllData) {
+            $dateFrom = null;
+            $dateTo = null;
+        } else {
+            // Set default date range if not provided (last 30 days)
+            $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+            $dateTo = $request->date_to ?? now()->format('Y-m-d');
+        }
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
-            $query->whereBetween('purchase_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+        $applyPurchaseFilters = function ($builder, bool $prefixed = false) use ($request, $showAllData, $dateFrom, $dateTo, $effectiveStatus) {
+            $statusColumn = $prefixed ? 'purchases.status' : 'status';
+            $dateColumn = $prefixed ? 'purchases.purchase_date' : 'purchase_date';
+            $outletColumn = $prefixed ? 'purchases.outlet_id' : 'outlet_id';
+            $supplierColumn = $prefixed ? 'purchases.supplier_id' : 'supplier_id';
+
+            $builder->where($statusColumn, $effectiveStatus);
+
+            if (!$showAllData && $dateFrom && $dateTo) {
+                $builder->whereBetween($dateColumn, [
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
         }
 
-        // Apply filters
         if ($request->outlet_id) {
-            $query->where('outlet_id', $request->outlet_id);
+                $builder->where($outletColumn, $request->outlet_id);
         }
 
         if ($request->supplier_id) {
-            $query->where('supplier_id', $request->supplier_id);
+                $builder->where($supplierColumn, $request->supplier_id);
         }
 
-        // Allow override for specific status if explicitly requested (for admin purposes)
-        if ($request->status && $request->get('include_all_status') === 'true') {
-            $query->where('status', $request->status);
-        }
+            return $builder;
+        };
+
+        $query = Purchase::with(['outlet', 'supplier', 'user']);
+        $query = $applyPurchaseFilters($query);
 
         // Check if summary is requested
         if ($request->get('summary') === 'true') {
@@ -274,36 +339,29 @@ class ReportController extends Controller
                 AVG(total_amount) as avg_purchase_value
             ')->first();
 
-            // Get top suppliers (only paid purchases)
-            $topSuppliers = Purchase::select('suppliers.name', 'suppliers.id')
-                ->join('suppliers', 'purchases.supplier_id', '=', 'suppliers.id')
-                ->where('purchases.status', 'paid')
-                ->whereBetween('purchase_date', [
-                    $request->date_from . ' 00:00:00',
-                    $request->date_to . ' 23:59:59'
-                ])
-                ->selectRaw('suppliers.name, suppliers.id, COUNT(*) as purchase_count, SUM(total_amount) as total_spent')
+            // Get top suppliers (respecting filters)
+            $topSuppliersQuery = Purchase::join('suppliers', 'purchases.supplier_id', '=', 'suppliers.id')
+                ->selectRaw('suppliers.name, suppliers.id, COUNT(*) as purchase_count, SUM(total_amount) as total_spent');
+            $topSuppliersQuery = $applyPurchaseFilters($topSuppliersQuery, true);
+            $topSuppliers = $topSuppliersQuery
                 ->groupBy('suppliers.id', 'suppliers.name')
                 ->orderBy('total_spent', 'desc')
                 ->limit(10)
                 ->get();
 
-            // Get purchase items breakdown (only paid purchases)
-            $itemsBreakdown = DB::table('purchase_items')
+            // Get purchase items breakdown (respecting filters)
+            $itemsBreakdownQuery = DB::table('purchase_items')
                 ->join('purchases', 'purchase_items.purchase_id', '=', 'purchases.id')
                 ->join('products', 'purchase_items.product_id', '=', 'products.id')
-                ->where('purchases.status', 'paid')
-                ->whereBetween('purchases.purchase_date', [
-                    $request->date_from . ' 00:00:00',
-                    $request->date_to . ' 23:59:59'
-                ])
                 ->selectRaw('
                     products.name,
                     products.sku,
                     SUM(purchase_items.quantity) as total_quantity,
                     SUM(purchase_items.total_price) as total_cost,
                     AVG(purchase_items.unit_price) as avg_unit_price
-                ')
+                ');
+            $itemsBreakdownQuery = $applyPurchaseFilters($itemsBreakdownQuery, true);
+            $itemsBreakdown = $itemsBreakdownQuery
                 ->groupBy('products.id', 'products.name', 'products.sku')
                 ->orderBy('total_cost', 'desc')
                 ->limit(10)
@@ -337,11 +395,83 @@ class ReportController extends Controller
             'total_remaining' => $query->sum('remaining_amount'),
         ];
 
+        // Get top suppliers for consistency
+        $topSuppliersQuery = Purchase::join('suppliers', 'purchases.supplier_id', '=', 'suppliers.id')
+            ->selectRaw('suppliers.name, suppliers.id, COUNT(*) as purchase_count, SUM(total_amount) as total_spent');
+        $topSuppliersQuery = $applyPurchaseFilters($topSuppliersQuery, true);
+        $topSuppliers = $topSuppliersQuery
+            ->groupBy('suppliers.id', 'suppliers.name')
+            ->orderBy('total_spent', 'desc')
+            ->limit(10)
+            ->get();
+
+        // Get top items for consistency
+        $topItemsQuery = DB::table('purchase_items')
+            ->join('purchases', 'purchase_items.purchase_id', '=', 'purchases.id')
+            ->join('products', 'purchase_items.product_id', '=', 'products.id')
+            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
+            ->selectRaw('
+                products.id,
+                products.name,
+                products.sku,
+                categories.name as category_name,
+                SUM(purchase_items.quantity) as total_sold,
+                SUM(purchase_items.total_price) as total_revenue
+            ');
+        $topItemsQuery = $applyPurchaseFilters($topItemsQuery, true);
+        $topItems = $topItemsQuery
+            ->groupBy('products.id', 'products.name', 'products.sku', 'categories.name')
+            ->orderBy('total_revenue', 'desc')
+            ->limit(10)
+            ->get();
+
+        // Get daily chart data for purchases
+        $chartData = [];
+        if ($showAllData || !$dateFrom || !$dateTo) {
+            $startDate = now()->subDays(30);
+            $endDate = now();
+        } else {
+        $startDate = Carbon::parse($dateFrom);
+        $endDate = Carbon::parse($dateTo);
+        }
+
+        for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+            $dayQuery = DB::table('purchases')
+                ->whereDate('purchase_date', $date->format('Y-m-d'))
+                ->selectRaw('
+                    date(purchase_date) as date,
+                    COUNT(*) as transactions_count,
+                    COALESCE(SUM(total_amount), 0) as total_amount,
+                    COALESCE(SUM(paid_amount), 0) as total_paid
+                ');
+            $dayQuery = $applyPurchaseFilters($dayQuery, true);
+            $dayData = $dayQuery->first();
+
+            $chartData[] = [
+                'date' => $date->format('Y-m-d'),
+                'period' => $date->format('Y-m-d'),
+                'transactions_count' => $dayData->transactions_count ?? 0,
+                'total_amount' => $dayData->total_amount ?? 0,
+                'total_paid' => $dayData->total_paid ?? 0
+            ];
+        }
+
         return response()->json([
             'success' => true,
             'data' => [
                 'purchases' => $purchases,
-                'summary' => $summary,
+                'summary' => [
+                    'total_purchases' => $query->count(),
+                    'total_amount' => $query->sum('total_amount'),
+                    'total_paid' => $query->sum('paid_amount'),
+                    'total_remaining' => $query->sum('remaining_amount'),
+                    'avg_purchase_value' => $query->avg('total_amount'),
+                    'total_suppliers' => $topSuppliers->count(),
+                    'total_items' => $topItems->sum('total_sold'),
+                ],
+                'top_products' => $topItems,
+                'top_suppliers' => $topSuppliers,
+                'grouped_data' => $chartData,
             ]
         ]);
     }
@@ -351,8 +481,10 @@ class ReportController extends Controller
      */
     public function stocks(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('reports.stocks')) {
+        if (!$user || !$user->can('reports.stocks')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -384,18 +516,19 @@ class ReportController extends Controller
                 $query->where('type', $request->movement_type);
             }
 
+            $summaryQuery = clone $query;
             $perPage = $request->get('per_page', 15);
-            $movements = $query->orderBy('created_at', 'desc')->paginate($perPage);
+            $movements = (clone $query)->orderBy('created_at', 'desc')->paginate($perPage);
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'movements' => $movements,
                     'summary' => [
-                        'total_movements' => $query->count(),
-                        'stock_in' => $query->where('type', 'in')->sum('quantity'),
-                        'stock_out' => $query->where('type', 'out')->sum('quantity'),
-                        'adjustments' => $query->where('type', 'adjustment')->count(),
+                        'total_movements' => (clone $summaryQuery)->count(),
+                        'stock_in' => (clone $summaryQuery)->where('type', 'in')->sum('quantity'),
+                        'stock_out' => (clone $summaryQuery)->where('type', 'out')->sum('quantity'),
+                        'adjustments' => (clone $summaryQuery)->where('type', 'adjustment')->count(),
                     ]
                 ]
             ]);
@@ -430,21 +563,72 @@ class ReportController extends Controller
                 $query->whereRaw('product_stocks.quantity <= products.min_stock');
             }
 
+            $summaryQuery = clone $query;
             $perPage = $request->get('per_page', 15);
-            $stocks = $query->paginate($perPage);
+            $stocks = (clone $query)->paginate($perPage);
 
             $summary = [
-                'total_products' => $query->count(),
-                'total_stock_value' => $query->sum(DB::raw('product_stocks.quantity * products.purchase_price')),
-                'low_stock_products' => $query->whereRaw('product_stocks.quantity <= products.min_stock')->count(),
-                'out_of_stock_products' => $query->where('product_stocks.quantity', 0)->count(),
+                'total_products' => (clone $summaryQuery)->count(),
+                'total_stock_value' => (clone $summaryQuery)->sum(DB::raw('product_stocks.quantity * products.purchase_price')),
+                'low_stock_products' => (clone $summaryQuery)->whereRaw('product_stocks.quantity <= products.min_stock')->count(),
+                'out_of_stock_products' => (clone $summaryQuery)->where('product_stocks.quantity', 0)->count(),
             ];
+
+            // Get top products by stock movement
+            $topStockProducts = DB::table('stock_movements')
+                ->join('products', 'stock_movements.product_id', '=', 'products.id')
+                ->join('categories', 'products.category_id', '=', 'categories.id')
+                ->selectRaw('
+                    products.id,
+                    products.name,
+                    products.sku,
+                    categories.name as category_name,
+                    SUM(CASE WHEN stock_movements.type = "in" THEN stock_movements.quantity ELSE 0 END) as stock_in,
+                    SUM(CASE WHEN stock_movements.type = "out" THEN stock_movements.quantity ELSE 0 END) as stock_out,
+                    SUM(CASE WHEN stock_movements.type = "in" THEN stock_movements.quantity ELSE -stock_movements.quantity END) as net_movement,
+                    COUNT(*) as movement_count
+                ')
+                ->groupBy('products.id', 'products.name', 'products.sku', 'categories.name')
+                ->orderBy('movement_count', 'desc')
+                ->limit(10)
+                ->get();
+
+            // Get daily stock movement chart data
+            $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+            $dateTo = $request->date_to ?? now()->format('Y-m-d');
+
+            $chartData = [];
+            $startDate = Carbon::parse($dateFrom);
+            $endDate = Carbon::parse($dateTo);
+
+            for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+                $dayData = DB::table('stock_movements')
+                    ->whereDate('created_at', $date->format('Y-m-d'))
+                    ->selectRaw('
+                        date(created_at) as date,
+                        SUM(CASE WHEN type = "in" THEN quantity ELSE 0 END) as stock_in,
+                        SUM(CASE WHEN type = "out" THEN quantity ELSE 0 END) as stock_out,
+                        COUNT(*) as movements_count
+                    ')
+                    ->first();
+
+                $chartData[] = [
+                    'date' => $date->format('Y-m-d'),
+                    'period' => $date->format('Y-m-d'),
+                    'stock_in' => $dayData->stock_in ?? 0,
+                    'stock_out' => $dayData->stock_out ?? 0,
+                    'movements_count' => $dayData->movements_count ?? 0,
+                    'net_movement' => ($dayData->stock_in ?? 0) - ($dayData->stock_out ?? 0)
+                ];
+            }
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'stocks' => $stocks,
                     'summary' => $summary,
+                    'top_products' => $topStockProducts,
+                    'grouped_data' => $chartData,
                 ]
             ]);
         }
@@ -454,11 +638,20 @@ class ReportController extends Controller
      */
     public function profit(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('reports.profit')) {
+        if (!$user) {
             return response()->json([
                 'success' => false,
-                'message' => 'Unauthorized'
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
+        if (!$user->can('reports.profit')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized - Missing reports.profit permission'
             ], 403);
         }
 
@@ -466,18 +659,30 @@ class ReportController extends Controller
             'date_from' => 'nullable|date',
             'date_to' => 'nullable|date|after_or_equal:date_from',
             'outlet_id' => 'nullable|exists:outlets,id',
+            'show_all_data' => 'nullable|boolean',
         ]);
+
+        // Handle date filtering
+        if ($request->show_all_data) {
+            // Show all data without date filter
+            $dateFrom = null;
+            $dateTo = null;
+        } else {
+            // Set default date range if not provided (last 30 days)
+            $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+            $dateTo = $request->date_to ?? now()->format('Y-m-d');
+        }
 
         // Calculate revenue from sales (transactions)
         $revenueQuery = DB::table('transaction_items')
             ->join('transactions', 'transaction_items.transaction_id', '=', 'transactions.id')
             ->where('transactions.status', 'completed');
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
+        // Apply date filter only if not showing all data
+        if (!$request->show_all_data && $dateFrom && $dateTo) {
             $revenueQuery->whereBetween('transactions.transaction_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
         }
 
@@ -491,15 +696,36 @@ class ReportController extends Controller
             DB::raw('SUM(transaction_items.quantity) as total_items_sold')
         )->first();
 
+        // Calculate refunds from transactions created in the same period
+        $refundQuery = DB::table('transactions')
+            ->where('status', 'refunded');
+
+        // Apply date filter only if not showing all data
+        if (!$request->show_all_data && $dateFrom && $dateTo) {
+            $refundQuery->whereBetween('transaction_date', [
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
+            ]);
+        }
+
+        if ($request->outlet_id) {
+            $refundQuery->where('outlet_id', $request->outlet_id);
+        }
+
+        $refundResult = $refundQuery->select(
+            DB::raw('SUM(total_amount) as total_refunds'),
+            DB::raw('COUNT(*) as refund_count')
+        )->first();
+
         // Calculate purchase costs (expenses) from purchases
         $purchaseQuery = DB::table('purchases')
             ->where('status', '!=', 'cancelled');
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
+        // Apply date filter only if not showing all data
+        if (!$request->show_all_data && $dateFrom && $dateTo) {
             $purchaseQuery->whereBetween('purchase_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
         }
 
@@ -520,11 +746,11 @@ class ReportController extends Controller
             ->join('products', 'transaction_items.product_id', '=', 'products.id')
             ->where('transactions.status', 'completed');
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
+        // Apply date filter only if not showing all data
+        if (!$request->show_all_data && $dateFrom && $dateTo) {
             $cogsQuery->whereBetween('transactions.transaction_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
         }
 
@@ -533,34 +759,180 @@ class ReportController extends Controller
         }
 
         $cogsResult = $cogsQuery->select(
-            DB::raw('SUM(transaction_items.quantity * products.purchase_price) as total_cogs')
+            DB::raw('SUM(transaction_items.quantity * COALESCE(transaction_items.purchase_price, products.purchase_price)) as total_cogs')
         )->first();
 
-        // Calculate final profit/loss
+        // Calculate final profit/loss - FIXED CALCULATION
         $totalRevenue = $revenueResult->total_revenue ?? 0;
+        $totalRefunds = $refundResult->total_refunds ?? 0;
+        $netRevenue = $totalRevenue - $totalRefunds;
         $totalPurchaseCost = $purchaseResult->total_purchase_cost ?? 0;
         $totalCogs = $cogsResult->total_cogs ?? 0;
 
-        // Profit = Revenue - COGS (not including all purchase costs to avoid double counting)
-        $grossProfit = $totalRevenue - $totalCogs;
+        // Get operational expenses (from expenses table)
+        $operationalExpenseQuery = DB::table('expenses')
+            ->whereBetween('expense_date', [$dateFrom ?? '1900-01-01', $dateTo ?? '9999-12-31']);
 
-        // Net profit = Gross profit (we don't subtract all purchases as they become inventory)
-        $netProfit = $grossProfit;
+        if ($request->outlet_id) {
+            $operationalExpenseQuery->where('outlet_id', $request->outlet_id);
+        }
+        $totalOperationalExpenses = (float) ($operationalExpenseQuery->sum('amount') ?? 0);
+
+        // Gross Profit = Net Revenue - COGS (Cost of Goods Sold)
+        $grossProfit = $netRevenue - $totalCogs;
+
+        // Operating Expenses calculation (Accrual Basis - Standard Accounting):
+        // - Operational Expenses: biaya operasional (sewa, listrik, gaji, dll)
+        // - Unsold Inventory Expense: Purchase Expenses yang belum menjadi COGS (barang yang dibeli tapi belum terjual)
+        // Operating Expenses = Operational Expenses + max(0, Purchase Expenses - COGS)
+        // Logika: Jika Purchase Expenses > COGS, ada barang yang belum terjual (expense)
+        //         Jika Purchase Expenses <= COGS, semua purchase sudah terjual (tidak perlu ditambahkan, karena COGS sudah dikurangkan)
+        $unsoldInventoryExpense = max(0, $totalPurchaseCost - $totalCogs);
+        $operatingExpenses = $totalOperationalExpenses + $unsoldInventoryExpense;
+
+        // Net Profit = Gross Profit - Operating Expenses
+        $netProfit = $grossProfit - $operatingExpenses;
+
+        // Get top profitable products for consistency
+        $topProducts = DB::table('transaction_items')
+            ->join('transactions', 'transaction_items.transaction_id', '=', 'transactions.id')
+            ->join('products', 'transaction_items.product_id', '=', 'products.id')
+            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
+            ->where('transactions.status', 'completed');
+
+        // Apply date filter only if not showing all data
+        if (!$request->show_all_data && $dateFrom && $dateTo) {
+            $topProducts->whereBetween('transactions.transaction_date', [
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
+            ]);
+        }
+
+        $topProducts = $topProducts->select(
+                'products.id',
+                'products.name',
+                'products.sku',
+                'categories.name as category_name',
+                DB::raw('SUM(transaction_items.quantity) as total_sold'),
+                DB::raw('SUM(transaction_items.total_price) as total_revenue'),
+                DB::raw('SUM(transaction_items.quantity * COALESCE(transaction_items.purchase_price, products.purchase_price)) as total_cost'),
+                DB::raw('SUM(transaction_items.total_price - (transaction_items.quantity * COALESCE(transaction_items.purchase_price, products.purchase_price))) as total_profit')
+            )
+            ->groupBy('products.id', 'products.name', 'products.sku', 'categories.name')
+            ->orderBy('total_profit', 'desc')
+            ->limit(10)
+            ->get();
+
+        // Get daily profit chart data
+        $chartData = [];
+        $startDate = Carbon::parse($dateFrom);
+        $endDate = Carbon::parse($dateTo);
+
+        for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+            // Daily revenue
+            $dailyRevenue = DB::table('transactions')
+                ->where('status', 'completed')
+                ->whereDate('transaction_date', $date->format('Y-m-d'))
+                ->selectRaw('
+                    COALESCE(SUM(total_amount), 0) as daily_revenue,
+                    COUNT(*) as transactions_count
+                ')
+                ->first();
+
+            // Daily refunds
+            $dailyRefunds = DB::table('transactions')
+                ->where('status', 'refunded')
+                ->whereDate('transaction_date', $date->format('Y-m-d'))
+                ->selectRaw('COALESCE(SUM(total_amount), 0) as daily_refunds')
+                ->first();
+
+            // Daily COGS
+            $dailyCogs = DB::table('transaction_items')
+                ->join('transactions', 'transaction_items.transaction_id', '=', 'transactions.id')
+                ->join('products', 'transaction_items.product_id', '=', 'products.id')
+                ->where('transactions.status', 'completed')
+                ->whereDate('transactions.transaction_date', $date->format('Y-m-d'))
+                ->selectRaw('
+                    COALESCE(SUM(transaction_items.quantity * COALESCE(transaction_items.purchase_price, products.purchase_price)), 0) as daily_cogs
+                ')
+                ->first();
+
+            $revenue = $dailyRevenue->daily_revenue ?? 0;
+            $refunds = $dailyRefunds->daily_refunds ?? 0;
+            $netRevenue = $revenue - $refunds;
+            $cogs = $dailyCogs->daily_cogs ?? 0;
+
+            // Daily purchase expenses
+            $dailyPurchaseExpenses = DB::table('purchases')
+                ->where('status', 'paid')
+                ->whereDate('purchase_date', $date->format('Y-m-d'))
+                ->when($request->outlet_id, function($query) use ($request) {
+                    return $query->where('outlet_id', $request->outlet_id);
+                })
+                ->sum('total_amount');
+
+            // Daily operational expenses
+            $dailyOperationalExpenses = DB::table('expenses')
+                ->whereDate('expense_date', $date->format('Y-m-d'))
+                ->when($request->outlet_id, function($query) use ($request) {
+                    return $query->where('outlet_id', $request->outlet_id);
+                })
+                ->sum('amount');
+
+            // Calculate profit according to accounting principles (Accrual Basis)
+            $grossProfit = $netRevenue - $cogs;
+            // Operating Expenses = Operational Expenses + max(0, Purchase Expenses - COGS)
+            // Hanya purchase expenses yang belum menjadi COGS yang dihitung sebagai expense
+            $dailyUnsoldInventoryExpense = max(0, $dailyPurchaseExpenses - $cogs);
+            $dailyOperatingExpenses = $dailyOperationalExpenses + $dailyUnsoldInventoryExpense;
+            $profit = $grossProfit - $dailyOperatingExpenses; // Net profit
+
+            $chartData[] = [
+                'date' => $date->format('Y-m-d'),
+                'period' => $date->format('Y-m-d'),
+                'total_revenue' => $revenue,
+                'total_refunds' => $refunds,
+                'net_revenue' => $netRevenue,
+                'total_cogs' => $cogs,
+                'net_profit' => $profit,
+                'transactions_count' => $dailyRevenue->transactions_count ?? 0,
+                'profit_margin' => $netRevenue > 0 ? round(($profit / $netRevenue) * 100, 2) : 0
+            ];
+        }
+
+        $profitMargin = $netRevenue > 0 ? round(($netProfit / $netRevenue) * 100, 2) : 0;
 
         return response()->json([
             'success' => true,
             'data' => [
-                'total_revenue' => $totalRevenue,
-                'total_purchase_cost' => $totalPurchaseCost, // Total purchases (becomes inventory)
-                'total_cogs' => $totalCogs, // Cost of goods actually sold
-                'gross_profit' => $grossProfit,
-                'net_profit' => $netProfit,
-                'profit_margin' => $totalRevenue > 0 ? round(($netProfit / $totalRevenue) * 100, 2) : 0,
-                'total_transactions' => $revenueResult->total_transactions ?? 0,
-                'total_purchases' => $purchaseResult->total_purchases ?? 0,
-                'total_items_sold' => $revenueResult->total_items_sold ?? 0,
-                'purchase_paid' => $purchaseResult->total_paid ?? 0,
-                'purchase_remaining' => $purchaseResult->total_remaining ?? 0,
+                'revenue' => [
+                    'total' => $totalRevenue,
+                    'refunds' => $totalRefunds,
+                    'net_revenue' => $netRevenue,
+                    'transaction_count' => $revenueResult->total_transactions ?? 0,
+                    'refund_count' => $refundResult->refund_count ?? 0,
+                ],
+                'total_cost' => $totalCogs,
+                'total_profit' => $netProfit,
+                'profit_margin' => $profitMargin,
+                'summary' => [
+                    'total_purchase_cost' => $totalPurchaseCost,
+                    'total_operational_expenses' => $totalOperationalExpenses,
+                    'total_expenses' => $totalPurchaseCost + $totalOperationalExpenses,
+                    'total_cogs' => $totalCogs,
+                    'gross_profit' => $grossProfit,
+                    'net_profit' => $netProfit,
+                    'operating_expenses' => $operatingExpenses,
+                    'gross_margin' => $netRevenue > 0 ? round(($grossProfit / $netRevenue) * 100, 2) : 0,
+                    'net_margin' => $profitMargin,
+                    'total_transactions' => $revenueResult->total_transactions ?? 0,
+                    'total_purchases' => $purchaseResult->total_purchases ?? 0,
+                    'total_items_sold' => $revenueResult->total_items_sold ?? 0,
+                    'purchase_paid' => $purchaseResult->total_paid ?? 0,
+                    'purchase_remaining' => $purchaseResult->total_remaining ?? 0,
+                ],
+                'top_products' => $topProducts,
+                'grouped_data' => $chartData,
             ]
         ]);
     }
@@ -570,21 +942,46 @@ class ReportController extends Controller
      */
     public function topProducts(Request $request): JsonResponse
     {
+        /** @var User $user */
+
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
+        if (!$user->can('reports.sales')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized - Missing reports.sales permission'
+            ], 403);
+        }
+
         $request->validate([
-            'date_from' => 'required|date',
-            'date_to' => 'required|date|after_or_equal:date_from',
+            'date_from' => 'nullable|date',
+            'date_to' => 'nullable|date|after_or_equal:date_from',
             'outlet_id' => 'nullable|exists:outlets,id',
             'limit' => 'nullable|integer|min:1|max:100',
+            'group_by' => 'nullable|in:day,week,month',
         ]);
 
         $limit = $request->get('limit', 10);
 
+        // Set default date range if not provided (last 30 days)
+        $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+        $dateTo = $request->date_to ?? now()->format('Y-m-d');
+
         $query = DB::table('transaction_items')
             ->join('transactions', 'transaction_items.transaction_id', '=', 'transactions.id')
             ->join('products', 'transaction_items.product_id', '=', 'products.id')
-            ->join('categories', 'products.category_id', '=', 'categories.id')
+            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
             ->where('transactions.status', 'completed')
-            ->whereBetween('transactions.transaction_date', [$request->date_from, $request->date_to])
+            ->whereBetween('transactions.transaction_date', [
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
+            ])
             ->select(
                 'products.id',
                 'products.name',
@@ -612,34 +1009,45 @@ class ReportController extends Controller
      */
     public function expenses(Request $request): JsonResponse
     {
-        $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('reports.purchases')) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
+        try {
+            /** @var User $user */
 
-        $request->validate([
-            'date_from' => 'nullable|date',
-            'date_to' => 'nullable|date|after_or_equal:date_from',
-            'outlet_id' => 'nullable|exists:outlets,id',
-            'supplier_id' => 'nullable|exists:suppliers,id',
-            'status' => 'nullable|in:pending,partial,paid,cancelled',
-        ]);
+            $user = Auth::user();
+            if (!$user) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthenticated'
+                ], 401);
+            }
 
-        // Get purchase expenses
+            if (!$user->can('reports.purchases')) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Unauthorized - Missing reports.purchases permission'
+                ], 403);
+            }
+
+            $request->validate([
+                'date_from' => 'nullable|date',
+                'date_to' => 'nullable|date|after_or_equal:date_from',
+                'outlet_id' => 'nullable|exists:outlets,id',
+                'supplier_id' => 'nullable|exists:suppliers,id',
+                'status' => 'nullable|in:pending,partial,paid,cancelled',
+            ]);
+
+            // Set default date range if not provided (last 30 days)
+            $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
+            $dateTo = $request->date_to ?? now()->format('Y-m-d');
+
+        // Get purchase expenses (only paid purchases for expenses report)
         $purchaseQuery = DB::table('purchases')
             ->join('suppliers', 'purchases.supplier_id', '=', 'suppliers.id')
-            ->join('outlets', 'purchases.outlet_id', '=', 'outlets.id');
-
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
-            $purchaseQuery->whereBetween('purchases.purchase_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+            ->join('outlets', 'purchases.outlet_id', '=', 'outlets.id')
+            ->where('purchases.status', 'paid') // Only include paid purchases in expenses
+            ->whereBetween('purchases.purchase_date', [
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ]);
-        }
 
         if ($request->outlet_id) {
             $purchaseQuery->where('purchases.outlet_id', $request->outlet_id);
@@ -649,11 +1057,12 @@ class ReportController extends Controller
             $purchaseQuery->where('purchases.supplier_id', $request->supplier_id);
         }
 
-        if ($request->status) {
+        // Allow override for specific status if explicitly requested (for admin purposes)
+        if ($request->status && $request->get('include_all_status') === 'true') {
             $purchaseQuery->where('purchases.status', $request->status);
         }
 
-        // Summary data
+        // Summary data - Purchase expenses
         $summary = $purchaseQuery->select(
             DB::raw('COUNT(*) as total_purchases'),
             DB::raw('SUM(purchases.total_amount) as total_amount'),
@@ -661,6 +1070,15 @@ class ReportController extends Controller
             DB::raw('SUM(purchases.remaining_amount) as total_remaining'),
             DB::raw('AVG(purchases.total_amount) as avg_purchase_value')
         )->first();
+
+        // Operational expenses (from expenses table) - Use DB query builder to avoid namespace issues
+        $operationalExpenseQuery = DB::table('expenses')
+            ->whereBetween('expense_date', [$dateFrom, $dateTo]);
+        if ($request->outlet_id) {
+            $operationalExpenseQuery->where('outlet_id', $request->outlet_id);
+        }
+        $operationalExpenses = (float) ($operationalExpenseQuery->sum('amount') ?? 0);
+        $operationalExpenseCount = (int) ($operationalExpenseQuery->count() ?? 0);
 
         // Top suppliers by expense
         $topSuppliers = $purchaseQuery->select(
@@ -674,16 +1092,15 @@ class ReportController extends Controller
         ->limit(10)
         ->get();
 
-        // Monthly breakdown - SQLite compatible
-        $monthlyQuery = DB::table('purchases');
+        // Monthly breakdown - SQLite compatible (only paid purchases)
+        $monthlyQuery = DB::table('purchases')
+            ->where('status', 'paid'); // Only include paid purchases
 
-        // Apply date filter if provided
-        if ($request->date_from && $request->date_to) {
-            $monthlyQuery->whereBetween('purchase_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
-            ]);
-        }
+        // Apply date filter (always apply default range)
+        $monthlyQuery->whereBetween('purchase_date', [
+            $dateFrom . ' 00:00:00',
+            $dateTo . ' 23:59:59'
+        ]);
 
         $monthlyQuery->when($request->outlet_id, function($query) use ($request) {
                 return $query->where('outlet_id', $request->outlet_id);
@@ -691,7 +1108,7 @@ class ReportController extends Controller
             ->when($request->supplier_id, function($query) use ($request) {
                 return $query->where('supplier_id', $request->supplier_id);
             })
-            ->when($request->status, function($query) use ($request) {
+            ->when($request->status && $request->get('include_all_status') === 'true', function($query) use ($request) {
                 return $query->where('status', $request->status);
             });
 
@@ -706,45 +1123,109 @@ class ReportController extends Controller
             ->orderBy('month')
             ->get();
 
-        // Top purchased items
+        // Top purchased items (only from paid purchases) - Format konsisten dengan sales
         $topItems = DB::table('purchase_items')
             ->join('purchases', 'purchase_items.purchase_id', '=', 'purchases.id')
             ->join('products', 'purchase_items.product_id', '=', 'products.id')
+            ->leftJoin('categories', 'products.category_id', '=', 'categories.id')
+            ->where('purchases.status', 'paid') // Only include paid purchases
             ->whereBetween('purchases.purchase_date', [
-                $request->date_from . ' 00:00:00',
-                $request->date_to . ' 23:59:59'
+                $dateFrom . ' 00:00:00',
+                $dateTo . ' 23:59:59'
             ])
             ->when($request->outlet_id, function($query) use ($request) {
                 return $query->where('purchases.outlet_id', $request->outlet_id);
             })
             ->select(
-                'products.name as product_name',
+                'products.id',
+                'products.name',
                 'products.sku',
-                DB::raw('SUM(purchase_items.quantity) as total_quantity'),
-                DB::raw('SUM(purchase_items.total_price) as total_cost'),
-                DB::raw('AVG(purchase_items.unit_price) as avg_unit_price')
+                'categories.name as category_name',
+                DB::raw('SUM(purchase_items.quantity) as total_sold'),
+                DB::raw('SUM(purchase_items.total_price) as total_revenue')
             )
-            ->groupBy('products.id', 'products.name', 'products.sku')
-            ->orderBy('total_cost', 'desc')
+            ->groupBy('products.id', 'products.name', 'products.sku', 'categories.name')
+            ->orderBy('total_revenue', 'desc')
             ->limit(10)
             ->get();
+
+        // Get daily chart data for expenses (purchase + operational)
+        $dailyExpenses = [];
+        $startDate = Carbon::parse($dateFrom);
+        $endDate = Carbon::parse($dateTo);
+
+        for ($date = $startDate->copy(); $date->lte($endDate); $date->addDay()) {
+            // Purchase expenses for this day
+            $dayPurchaseQuery = DB::table('purchases')
+                ->where('status', 'paid')
+                ->whereDate('purchase_date', $date->format('Y-m-d'));
+            if ($request->outlet_id) {
+                $dayPurchaseQuery->where('outlet_id', $request->outlet_id);
+            }
+            $dayPurchaseData = $dayPurchaseQuery->selectRaw('
+                    COUNT(*) as purchase_count,
+                    COALESCE(SUM(total_amount), 0) as total_amount,
+                    COALESCE(SUM(paid_amount), 0) as total_paid
+                ')
+                ->first();
+
+            // Operational expenses for this day - Use DB query builder to avoid namespace issues
+            $dayOperationalQuery = DB::table('expenses')
+                ->whereDate('expense_date', $date->format('Y-m-d'));
+            if ($request->outlet_id) {
+                $dayOperationalQuery->where('outlet_id', $request->outlet_id);
+            }
+            $dayOperationalExpense = (float) ($dayOperationalQuery->sum('amount') ?? 0);
+            $dayOperationalCount = (int) ($dayOperationalQuery->count() ?? 0);
+
+            $totalDayExpense = ($dayPurchaseData->total_amount ?? 0) + $dayOperationalExpense;
+
+            $dailyExpenses[] = [
+                'date' => $date->format('Y-m-d'),
+                'period' => $date->format('Y-m-d'),
+                'purchase_count' => $dayPurchaseData->purchase_count ?? 0,
+                'operational_count' => $dayOperationalCount,
+                'total_amount' => $totalDayExpense,
+                'purchase_amount' => $dayPurchaseData->total_amount ?? 0,
+                'operational_amount' => $dayOperationalExpense,
+                'total_paid' => $dayPurchaseData->total_paid ?? 0
+            ];
+        }
 
         return response()->json([
             'success' => true,
             'data' => [
                 'summary' => [
-                    'total_purchases' => $summary->total_purchases ?? 0,
-                    'total_amount' => $summary->total_amount ?? 0,
-                    'total_paid' => $summary->total_paid ?? 0,
-                    'total_remaining' => $summary->total_remaining ?? 0,
-                    'avg_purchase_value' => $summary->avg_purchase_value ?? 0,
-                    'payment_completion_rate' => $summary->total_amount > 0 ?
-                        round(($summary->total_paid / $summary->total_amount) * 100, 2) : 0,
+                    'total_purchases' => (int) ($summary->total_purchases ?? 0),
+                    'total_amount' => (float) (($summary->total_amount ?? 0) + $operationalExpenses),
+                    'purchase_amount' => (float) ($summary->total_amount ?? 0),
+                    'operational_amount' => (float) $operationalExpenses,
+                    'operational_count' => (int) $operationalExpenseCount,
+                    'total_paid' => (float) ($summary->total_paid ?? 0),
+                    'total_remaining' => (float) ($summary->total_remaining ?? 0),
+                    'avg_purchase_value' => (float) ($summary->avg_purchase_value ?? 0),
+                    'total_suppliers' => (int) $topSuppliers->count(),
+                    'total_items' => (float) ($topItems->sum('total_sold') ?? 0),
+                    'payment_completion_rate' => ($summary->total_amount ?? 0) > 0 ?
+                        round((($summary->total_paid ?? 0) / ($summary->total_amount ?? 1)) * 100, 2) : 0,
                 ],
+                'top_products' => $topItems,
                 'top_suppliers' => $topSuppliers,
                 'monthly_breakdown' => $monthlyBreakdown,
-                'top_items' => $topItems,
+                'grouped_data' => $dailyExpenses,
             ]
         ]);
+        } catch (\Exception $e) {
+            Log::error('Expenses Report Error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to generate expenses report: ' . $e->getMessage()
+            ], 500);
+        }
     }
 }

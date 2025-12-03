@@ -21,7 +21,7 @@ if ($transactions->count() > 0) {
         echo "Transaction Details:\n";
         echo "- Number: " . ($tx->transaction_number ?? 'N/A') . "\n";
         echo "- Date: " . $tx->transaction_date . "\n";
-        echo "- Total: " . number_format($tx->total_amount) . "\n";
+        echo "- Total: " . number_format((float) $tx->total_amount) . "\n";
         echo "- Status: " . $tx->status . "\n";
         echo "- Items: " . $tx->transactionItems->count() . "\n";
         echo "- Created: " . $tx->created_at . "\n";
@@ -32,8 +32,8 @@ if ($transactions->count() > 0) {
             foreach ($tx->transactionItems as $item) {
                 echo "  - Product ID: " . $item->product_id . "\n";
                 echo "  - Quantity: " . $item->quantity . "\n";
-                echo "  - Unit Price: " . number_format($item->unit_price ?? 0) . "\n";
-                echo "  - Total: " . number_format($item->total_price ?? 0) . "\n";
+                echo "  - Unit Price: " . number_format((float) ($item->unit_price ?? 0)) . "\n";
+                echo "  - Total: " . number_format((float) ($item->total_price ?? 0)) . "\n";
                 if ($item->product) {
                     echo "  - Product Name: " . $item->product->name . "\n";
                 }

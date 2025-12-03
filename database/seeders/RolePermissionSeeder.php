@@ -31,6 +31,9 @@ class RolePermissionSeeder extends Seeder
             // Purchase Management
             'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete',
 
+            // Expense Management
+            'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
+
             // Customer Management
             'customers.view', 'customers.create', 'customers.edit', 'customers.delete',
 
@@ -51,10 +54,16 @@ class RolePermissionSeeder extends Seeder
 
             // Promotions
             'promotions.view', 'promotions.create', 'promotions.edit', 'promotions.delete',
+
+            // Audit Logs
+            'audit-logs.view', 'audit-logs.delete',
+
+            // Export/Import
+            'export.view', 'import.create',
         ];
 
         foreach ($permissions as $permission) {
-            Permission::create(['name' => $permission]);
+            Permission::firstOrCreate(['name' => $permission]);
         }
 
         // Create Roles
@@ -65,35 +74,39 @@ class RolePermissionSeeder extends Seeder
         $warehouse = Role::create(['name' => 'Warehouse']);
 
         // Assign permissions to roles
-        // Super Admin - Full access including stock management
-        $superAdmin->syncPermissions([
-            'users.view', 'users.create', 'users.edit', 'users.delete',
-            'products.view', 'products.create', 'products.edit', 'products.delete',
-            'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
-            'transactions.view',
-            'purchases.view',
-            'customers.view', 'customers.create', 'customers.edit', 'customers.delete',
-            'suppliers.view', 'suppliers.create', 'suppliers.edit', 'suppliers.delete',
-            'stocks.view', 'stocks.adjustment', 'stocks.transfer',
-            'reports.sales', 'reports.purchases', 'reports.stocks', 'reports.profit',
-            'settings.view', 'settings.edit',
-            'outlets.view', 'outlets.create', 'outlets.edit', 'outlets.delete',
-            'promotions.view',
-        ]);
+        // Super Admin - Full access to ALL permissions (including new ones)
+        $superAdmin->syncPermissions(Permission::all());
+
+        // Update existing roles to include new expenses permissions
+        $expensesPermissions = Permission::whereIn('name', [
+            'expenses.view',
+            'expenses.create',
+            'expenses.edit',
+            'expenses.delete'
+        ])->get();
+
+        // Add expenses permissions to Admin role
+        $admin->givePermissionTo($expensesPermissions);
+
+        // Add expenses permissions to Manager role
+        $manager->givePermissionTo($expensesPermissions);
 
         // Admin - Can manage stock but limited user management
         $admin->syncPermissions([
             'users.view',
             'products.view', 'products.create', 'products.edit', 'products.delete',
             'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
-            'transactions.view',
+            'transactions.view', 'transactions.refund',
             'purchases.view',
+            'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
             'customers.view', 'customers.create',
             'suppliers.view', 'suppliers.create',
             'stocks.view', 'stocks.adjustment', 'stocks.transfer',
-            'reports.sales', 'reports.purchases', 'reports.stocks',
+            'reports.sales', 'reports.purchases', 'reports.stocks', 'reports.profit',
             'settings.view',
             'promotions.view',
+            'audit-logs.view',
+            'export.view', 'import.create',
         ]);
 
         // Manager - FULL ACCESS untuk operasional (kecuali kelola user dan outlet)
@@ -103,11 +116,13 @@ class RolePermissionSeeder extends Seeder
             'categories.view', 'categories.create', 'categories.edit', 'categories.delete',
             'transactions.view', 'transactions.create', 'transactions.edit', 'transactions.delete', 'transactions.refund',
             'purchases.view', 'purchases.create', 'purchases.edit', 'purchases.delete',
+            'expenses.view', 'expenses.create', 'expenses.edit', 'expenses.delete',
             'customers.view', 'customers.create', 'customers.edit', 'customers.delete',
             'suppliers.view', 'suppliers.create', 'suppliers.edit', 'suppliers.delete',
             'stocks.view', 'stocks.adjustment', 'stocks.transfer',
             'reports.sales', 'reports.purchases', 'reports.stocks', 'reports.profit',
             'promotions.view', 'promotions.create', 'promotions.edit', 'promotions.delete',
+            'export.view', 'import.create',
         ]);
 
         $cashier->syncPermissions([

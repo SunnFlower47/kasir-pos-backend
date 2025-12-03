@@ -7,6 +7,7 @@ use App\Models\Supplier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use App\Models\User;
 
 class SupplierController extends Controller
 {
@@ -42,8 +43,10 @@ class SupplierController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('suppliers.create')) {
+        if (!$user || !$user->can('suppliers.create')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -88,8 +91,10 @@ class SupplierController extends Controller
      */
     public function update(Request $request, Supplier $supplier): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('suppliers.edit')) {
+        if (!$user || !$user->can('suppliers.edit')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -119,8 +124,10 @@ class SupplierController extends Controller
      */
     public function destroy(Supplier $supplier): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('suppliers.delete')) {
+        if (!$user || !$user->can('suppliers.delete')) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

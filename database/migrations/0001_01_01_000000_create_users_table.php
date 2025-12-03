@@ -20,7 +20,7 @@ return new class extends Migration
             $table->string('phone')->nullable();
             $table->string('avatar')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->foreignId('outlet_id')->nullable()->constrained('outlets')->onDelete('set null');
+            $table->unsignedBigInteger('outlet_id')->nullable();
             $table->rememberToken();
             $table->timestamps();
         });

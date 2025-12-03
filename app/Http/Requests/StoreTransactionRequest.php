@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Models\Product;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Auth;
 
@@ -12,8 +13,9 @@ class StoreTransactionRequest extends FormRequest
      */
     public function authorize(): bool
     {
+        /** @var \App\Models\User $user */
         $user = Auth::user();
-        return $user && method_exists($user, 'can') && $user->can('transactions.create');
+        return $user && $user->can('transactions.create');
     }
 
     /**
@@ -79,7 +81,17 @@ class StoreTransactionRequest extends FormRequest
 
             if ($this->has('items')) {
                 foreach ($this->items as $item) {
-                    $unitPrice = $item['unit_price'] ?? 0;
+                    // Use the unit_price sent from frontend (respects wholesale price selection)
+                    // Only fallback to product selling_price if unit_price is not provided
+                    $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0 
+                        ? (float) $item['unit_price'] 
+                        : null;
+                    
+                    if ($unitPrice === null && isset($item['product_id'])) {
+                        $product = Product::find($item['product_id']);
+                        $unitPrice = $product?->selling_price ?? 0;
+                    }
+
                     $quantity = $item['quantity'] ?? 0;
                     $itemDiscount = $item['discount_amount'] ?? 0;
                     $subtotal += ($unitPrice * $quantity) - $itemDiscount;

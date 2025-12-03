@@ -17,18 +17,32 @@ return [
 
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
 
-    'allowed_methods' => ['*'],
+    'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'https://kasir-pos.sunnflower.site', // Production frontend
+        'http://localhost:4173', // Local development
+        'http://127.0.0.1:4173', // Local development
+        // Note: Electron app origins are handled by AllowElectronOrigin middleware
+        // This allows Electron app to work without exposing localhost to web browser
+    ],
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['*'],
+    'allowed_headers' => [
+        'Content-Type',
+        'Authorization',
+        'X-Requested-With',
+        'X-Client-Type',
+        'X-Client-Version',
+        'Accept',
+        'Origin',
+    ],
 
     'exposed_headers' => [],
 
     'max_age' => 0,
 
-    'supports_credentials' => false,
+    'supports_credentials' => true, // Allow credentials for authenticated requests
 
 ];

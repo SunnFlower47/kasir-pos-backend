@@ -13,6 +13,9 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use App\Models\User;
+use Carbon\Carbon;
 
 class TransactionController extends Controller
 {
@@ -21,54 +24,74 @@ class TransactionController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Transaction::with(['customer', 'outlet', 'user', 'transactionItems.product']);
+        try {
+            // Build query with eager loading
+            $query = Transaction::with([
+                'customer:id,name,email,phone',
+                'outlet:id,name',
+                'user:id,name,email',
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price',
+                'transactionItems.product:id,name,sku'
+            ]);
 
-        // Filter by outlet
-        if ($request->has('outlet_id')) {
-            $query->where('outlet_id', $request->outlet_id);
+            // Filter by outlet
+            if ($request->has('outlet_id') && $request->outlet_id) {
+                $query->where('outlet_id', $request->outlet_id);
+            }
+
+            // Filter by user (cashier)
+            if ($request->has('user_id') && $request->user_id) {
+                $query->where('user_id', $request->user_id);
+            }
+
+            // Filter by customer
+            if ($request->has('customer_id') && $request->customer_id) {
+                $query->where('customer_id', $request->customer_id);
+            }
+
+            // Filter by status
+            if ($request->has('status') && $request->status) {
+                $query->where('status', $request->status);
+            }
+
+            // Filter by payment method
+            if ($request->has('payment_method') && $request->payment_method) {
+                $query->where('payment_method', $request->payment_method);
+            }
+
+            // Filter by date range (database agnostic)
+            if ($request->has('date_from') && $request->date_from) {
+                $query->where('transaction_date', '>=', $request->date_from . ' 00:00:00');
+            }
+
+            if ($request->has('date_to') && $request->date_to) {
+                $query->where('transaction_date', '<=', $request->date_to . ' 23:59:59');
+            }
+
+            // Search by transaction number
+            if ($request->has('search') && $request->search) {
+                $query->where('transaction_number', 'like', '%' . $request->search . '%');
+            }
+
+            $perPage = $request->get('per_page', 15);
+            $transactions = $query->orderBy('created_at', 'desc')->paginate($perPage);
+
+            return response()->json([
+                'success' => true,
+                'data' => $transactions
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching transactions', [
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error loading transactions: ' . $e->getMessage()
+            ], 500);
         }
-
-        // Filter by user (cashier)
-        if ($request->has('user_id')) {
-            $query->where('user_id', $request->user_id);
-        }
-
-        // Filter by customer
-        if ($request->has('customer_id')) {
-            $query->where('customer_id', $request->customer_id);
-        }
-
-        // Filter by status
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by payment method
-        if ($request->has('payment_method')) {
-            $query->where('payment_method', $request->payment_method);
-        }
-
-        // Filter by date range
-        if ($request->has('date_from')) {
-            $query->whereDate('transaction_date', '>=', $request->date_from);
-        }
-
-        if ($request->has('date_to')) {
-            $query->whereDate('transaction_date', '<=', $request->date_to);
-        }
-
-        // Search by transaction number
-        if ($request->has('search')) {
-            $query->where('transaction_number', 'like', '%' . $request->search . '%');
-        }
-
-        $perPage = $request->get('per_page', 15);
-        $transactions = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
-        return response()->json([
-            'success' => true,
-            'data' => $transactions
-        ]);
     }
 
     /**
@@ -76,13 +99,15 @@ class TransactionController extends Controller
      */
     public function store(StoreTransactionRequest $request): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
 
         // Auto-set outlet if not provided
         $outletId = $request->outlet_id ?? $user->outlet_id ?? 1; // Default to outlet 1 if no outlet assigned
 
         // Log transaction request details
-        \Log::info('Creating new transaction:', [
+        Log::info('Creating new transaction:', [
             'user_id' => $user->id,
             'user_name' => $user->name,
             'outlet_id' => $outletId,
@@ -95,12 +120,27 @@ class TransactionController extends Controller
         DB::beginTransaction();
         try {
             // Create transaction
+            // Parse transaction_date if provided, or use current datetime
+            // Frontend sends local time in format YYYY-MM-DDTHH:mm:ss (no timezone)
+            // Parse it as local time and store as-is
+            if ($request->transaction_date) {
+                // Parse the date string (format: YYYY-MM-DDTHH:mm:ss or YYYY-MM-DD HH:mm:ss)
+                $dateString = str_replace('T', ' ', $request->transaction_date);
+                // Ensure it has seconds if not present
+                if (strlen($dateString) === 16) { // YYYY-MM-DD HH:mm
+                    $dateString .= ':00';
+                }
+                $transactionDate = \Carbon\Carbon::parse($dateString);
+            } else {
+                $transactionDate = now();
+            }
+
             $transaction = Transaction::create([
                 'transaction_number' => Transaction::generateTransactionNumber(),
                 'outlet_id' => $outletId,
                 'customer_id' => $request->customer_id,
                 'user_id' => $user->id,
-                'transaction_date' => $request->transaction_date ?? now()->toDateString(),
+                'transaction_date' => $transactionDate,
                 'subtotal' => 0,
                 'discount_amount' => $request->discount_amount ?? 0,
                 'tax_amount' => $request->tax_amount ?? 0,
@@ -119,7 +159,7 @@ class TransactionController extends Controller
                 $product = Product::findOrFail($item['product_id']);
 
                 // Log transaction item details
-                \Log::info('Processing transaction item:', [
+                Log::info('Processing transaction item:', [
                     'product_id' => $item['product_id'],
                     'product_name' => $product->name,
                     'requested_quantity' => $item['quantity'],
@@ -133,14 +173,14 @@ class TransactionController extends Controller
 
                 // Log stock information
                 if ($productStock) {
-                    \Log::info('Stock found:', [
+                    Log::info('Stock found:', [
                         'product_id' => $product->id,
                         'outlet_id' => $outletId,
                         'available_stock' => $productStock->quantity,
                         'requested_quantity' => $item['quantity']
                     ]);
                 } else {
-                    \Log::warning('No stock record found:', [
+                    Log::warning('No stock record found:', [
                         'product_id' => $product->id,
                         'outlet_id' => $outletId
                     ]);
@@ -152,7 +192,7 @@ class TransactionController extends Controller
                 }
 
                 if ($productStock->quantity < $item['quantity']) {
-                    \Log::error('Insufficient stock:', [
+                    Log::error('Insufficient stock:', [
                         'product_name' => $product->name,
                         'available_stock' => $productStock->quantity,
                         'requested_quantity' => $item['quantity'],
@@ -163,16 +203,33 @@ class TransactionController extends Controller
                 }
 
                 // Calculate item total
-                $unitPrice = $item['unit_price'] ?? $product->selling_price;
+                // Use the unit_price sent from frontend (respects wholesale price selection)
+                // Only fallback to product selling_price if unit_price is not provided
+                $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0
+                    ? (float) $item['unit_price']
+                    : $product->selling_price;
                 $itemDiscount = $item['discount_amount'] ?? 0;
                 $totalPrice = ($unitPrice * $item['quantity']) - $itemDiscount;
 
-                // Create transaction item
+                // Log for debugging wholesale price usage
+                if (isset($item['unit_price']) && abs($item['unit_price'] - $product->selling_price) > 0.01) {
+                    Log::info('Using custom unit price (wholesale):', [
+                        'product_id' => $product->id,
+                        'product_name' => $product->name,
+                        'selling_price' => $product->selling_price,
+                        'wholesale_price' => $product->wholesale_price,
+                        'unit_price_sent' => $item['unit_price'] ?? null,
+                        'unit_price_used' => $unitPrice,
+                    ]);
+                }
+
+                // Create transaction item with snapshot of purchase price
                 TransactionItem::create([
                     'transaction_id' => $transaction->id,
                     'product_id' => $product->id,
                     'quantity' => $item['quantity'],
                     'unit_price' => $unitPrice,
+                    'purchase_price' => $product->purchase_price, // Store snapshot of purchase price at transaction time
                     'discount_amount' => $itemDiscount,
                     'total_price' => $totalPrice,
                 ]);
@@ -198,8 +255,13 @@ class TransactionController extends Controller
             // Add loyalty points if customer exists
             if ($transaction->customer_id) {
                 $customer = Customer::find($transaction->customer_id);
-                $loyaltyRate = \App\Models\Setting::get('loyalty_points_rate', 100);
-                $points = floor($transaction->total_amount / $loyaltyRate);
+                // Use new loyalty_points_per_rupiah (backward compatible with loyalty_points_rate)
+                $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_per_rupiah', null);
+                if ($pointsPerRupiah === null) {
+                    // Fallback to old loyalty_points_rate for backward compatibility
+                    $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_rate', 200);
+                }
+                $points = floor($transaction->total_amount / $pointsPerRupiah);
                 if ($points > 0) {
                     $customer->addLoyaltyPoints($points);
                 }
@@ -219,7 +281,7 @@ class TransactionController extends Controller
             DB::rollback();
 
             // Log transaction error
-            \Log::error('Failed to create transaction', [
+            Log::error('Failed to create transaction', [
                 'error' => $e->getMessage(),
                 'user_id' => $user->id ?? null,
                 'request_data' => $request->all()
@@ -238,12 +300,32 @@ class TransactionController extends Controller
      */
     public function show(Transaction $transaction): JsonResponse
     {
-        $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
+        try {
+            $transaction->load([
+                'customer:id,name,email,phone',
+                'outlet:id,name',
+                'user:id,name,email',
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price',
+                'transactionItems.product:id,name,sku,selling_price,purchase_price',
+                'transactionItems.product.category:id,name',
+                'transactionItems.product.unit:id,name'
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'data' => $transaction
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $transaction
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error fetching transaction detail', [
+                'transaction_id' => $transaction->id,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Error loading transaction: ' . $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -251,11 +333,20 @@ class TransactionController extends Controller
      */
     public function refund(Request $request, Transaction $transaction): JsonResponse
     {
+        /** @var User $user */
+
         $user = Auth::user();
-        if (!$user || !method_exists($user, 'can') || !$user->can('transactions.refund')) {
+        if (!$user) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
+            ], 403);
+        }
+
+        if (!$user->can('transactions.refund')) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized - Missing transactions.refund permission'
             ], 403);
         }
 
@@ -264,6 +355,50 @@ class TransactionController extends Controller
                 'success' => false,
                 'message' => 'Only completed transactions can be refunded'
             ], 422);
+        }
+
+        // Check if refund is enabled
+        $refundEnabled = \App\Models\Setting::get('refund_enabled', true);
+        if (!$refundEnabled) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Refund feature is currently disabled'
+            ], 422);
+        }
+
+        // Role-based refund time limit
+        $isAdmin = $user->hasRole(['Super Admin', 'Admin', 'Manager']);
+        $isCashier = $user->hasRole('Cashier');
+
+        $transactionDate = \Carbon\Carbon::parse($transaction->transaction_date);
+
+        // Kasir hanya bisa refund transaksi hari ini
+        if ($isCashier) {
+            $sameDayOnly = \App\Models\Setting::get('refund_allow_same_day_only_for_cashier', true);
+            if ($sameDayOnly) {
+                if (!$transactionDate->isToday()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Anda hanya bisa melakukan refund untuk transaksi hari ini'
+                    ], 422);
+                }
+            }
+        }
+        // Admin/Manager bisa refund dengan batasan waktu (jika di-set)
+        else {
+            $refundDaysLimit = \App\Models\Setting::get('refund_days_limit', 7);
+
+            // Jika limit = 0, berarti tidak ada batasan (admin bisa refund kapan saja)
+            if ($refundDaysLimit > 0) {
+                $daysSinceTransaction = now()->diffInDays($transactionDate);
+
+                if ($daysSinceTransaction > $refundDaysLimit) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => "Transaksi hanya bisa di-refund dalam {$refundDaysLimit} hari sejak transaksi dibuat. Transaksi ini sudah {$daysSinceTransaction} hari."
+                    ], 422);
+                }
+            }
         }
 
         $request->validate([
@@ -292,8 +427,13 @@ class TransactionController extends Controller
             // Deduct loyalty points if customer exists
             if ($transaction->customer_id) {
                 $customer = Customer::find($transaction->customer_id);
-                $loyaltyRate = \App\Models\Setting::get('loyalty_points_rate', 100);
-                $points = floor($transaction->total_amount / $loyaltyRate);
+                // Use new loyalty_points_per_rupiah (backward compatible with loyalty_points_rate)
+                $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_per_rupiah', null);
+                if ($pointsPerRupiah === null) {
+                    // Fallback to old loyalty_points_rate for backward compatibility
+                    $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_rate', 200);
+                }
+                $points = floor($transaction->total_amount / $pointsPerRupiah);
                 if ($points > 0) {
                     $customer->deductLoyaltyPoints($points);
                 }
