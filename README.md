@@ -1,61 +1,302 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Kasir POS System - Backend Documentation
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+## 📋 Daftar Isi
 
-## About Laravel
+1. [Overview](#overview)
+2. [Instalasi](#instalasi)
+3. [Konfigurasi](#konfigurasi)
+4. [Database Schema](#database-schema)
+5. [API Documentation](#api-documentation)
+6. [Features](#features)
+7. [Security](#security)
+8. [Performance](#performance)
+9. [Deployment](#deployment)
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## 🎯 Overview
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+**Kasir POS System** adalah sistem Point of Sale (POS) berbasis web yang dibangun dengan **Laravel 11** dan menggunakan **Laravel Sanctum** untuk authentication. Sistem ini dirancang untuk membantu pengelolaan transaksi, inventori, dan pelaporan bisnis retail.
 
-## Learning Laravel
+### Teknologi yang Digunakan
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+- **Framework**: Laravel 11.x
+- **PHP**: 8.2+
+- **Database**: MySQL / SQLite / PostgreSQL
+- **Authentication**: Laravel Sanctum (Token-based)
+- **Authorization**: Spatie Laravel Permission
+- **PDF Generation**: DomPDF
+- **Excel Export**: Maatwebsite Excel
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+### Fitur Utama
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+- ✅ Multi-outlet support
+- ✅ Product & Inventory Management
+- ✅ Transaction Processing (POS)
+- ✅ Customer Management dengan Loyalty Points
+- ✅ Purchase Order Management
+- ✅ Stock Management & Transfers
+- ✅ Financial Reports (Enhanced, Financial, Advanced)
+- ✅ Expense Management
+- ✅ Audit Logging
+- ✅ Role & Permission Management
+- ✅ Receipt Printing (PDF & HTML)
+- ✅ Refund System
+- ✅ Settings Management
 
-## Laravel Sponsors
+---
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## 📦 Instalasi
 
-### Premium Partners
+Lihat [INSTALLATION.md](./INSTALLATION.md) untuk panduan instalasi lengkap.
 
-- **[Vehikl](https://vehikl.com)**
-- **[Tighten Co.](https://tighten.co)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Redberry](https://redberry.international/laravel-development)**
-- **[Active Logic](https://activelogic.com)**
+### Quick Start
 
-## Contributing
+```bash
+# Clone repository
+git clone <repository-url>
+cd kasir-pos-system
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+# Install dependencies
+composer install
 
-## Code of Conduct
+# Copy environment file
+cp .env.example .env
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+# Generate application key
+php artisan key:generate
 
-## Security Vulnerabilities
+# Setup database di .env
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=kasir_pos
+DB_USERNAME=root
+DB_PASSWORD=
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+# Run migrations
+php artisan migrate
 
-## License
+# Seed database
+php artisan db:seed
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+# Generate Sanctum keys
+php artisan vendor:publish --provider="Laravel\Sanctum\SanctumServiceProvider"
+php artisan migrate
+
+# Create storage link
+php artisan storage:link
+
+# Run server
+php artisan serve
+```
+
+---
+
+## ⚙️ Konfigurasi
+
+### Environment Variables
+
+File `.env` berisi konfigurasi penting:
+
+```env
+# Application
+APP_NAME="Kasir POS System"
+APP_ENV=local
+APP_KEY=
+APP_DEBUG=true
+APP_URL=http://localhost:8000
+
+# Database
+DB_CONNECTION=mysql
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_DATABASE=kasir_pos
+DB_USERNAME=root
+DB_PASSWORD=
+
+# Frontend URL (untuk CORS)
+FRONTEND_URL=http://localhost:4173
+
+# Sanctum
+SANCTUM_STATEFUL_DOMAINS=localhost,127.0.0.1
+SESSION_DRIVER=database
+```
+
+### Konfigurasi Tambahan
+
+- **CORS**: `config/cors.php` - Konfigurasi CORS untuk frontend
+- **Sanctum**: `config/sanctum.php` - Konfigurasi authentication
+- **Permission**: `config/permission.php` - Konfigurasi role & permission
+
+---
+
+## 🗄️ Database Schema
+
+Lihat [DATABASE.md](./DATABASE.md) untuk dokumentasi lengkap schema database.
+
+### Tabel Utama
+
+- `users` - User management
+- `outlets` - Multi-outlet support
+- `products` - Product catalog
+- `categories` - Product categories
+- `units` - Measurement units
+- `customers` - Customer data dengan loyalty points
+- `suppliers` - Supplier management
+- `transactions` - Sales transactions
+- `transaction_items` - Transaction details
+- `purchases` - Purchase orders
+- `purchase_items` - Purchase details
+- `product_stocks` - Stock per outlet
+- `stock_movements` - Stock movement history
+- `stock_transfers` - Stock transfers antar outlet
+- `expenses` - Operational expenses
+- `promotions` - Promotions & discounts
+- `settings` - Application settings
+- `audit_logs` - System audit trail
+
+---
+
+## 🔌 API Documentation
+
+Lihat [API.md](./API.md) untuk dokumentasi lengkap semua API endpoints.
+
+### Base URL
+
+```
+http://localhost:8000/api/v1
+```
+
+### Authentication
+
+Semua API endpoints (kecuali login) memerlukan Bearer Token:
+
+```
+Authorization: Bearer {token}
+```
+
+### Response Format
+
+```json
+{
+  "success": true,
+  "data": {...},
+  "message": "Optional message"
+}
+```
+
+---
+
+## ✨ Features
+
+Lihat [FEATURES.md](./FEATURES.md) untuk dokumentasi lengkap semua fitur.
+
+### Fitur Utama
+
+1. **Authentication & Authorization**
+   - Token-based authentication (Sanctum)
+   - Role-based access control (RBAC)
+   - Permission-based access control (PBAC)
+
+2. **Product Management**
+   - CRUD Products
+   - Category & Unit management
+   - Barcode support
+   - Product images
+   - Stock tracking per outlet
+
+3. **Transaction Processing**
+   - POS interface support
+   - Multiple payment methods
+   - Discount & promotions
+   - Receipt generation
+   - Refund system
+
+4. **Inventory Management**
+   - Stock tracking per outlet
+   - Stock adjustments
+   - Stock transfers antar outlet
+   - Stock movement history
+   - Low stock alerts
+
+5. **Reporting**
+   - Enhanced Report (Sales analytics)
+   - Financial Report (Laba/rugi)
+   - Advanced Report (Business intelligence)
+
+6. **Customer Management**
+   - Customer database
+   - Loyalty points system
+   - Flexible level system
+   - Purchase history
+
+---
+
+## 🔒 Security
+
+Lihat [SECURITY-AUDIT.md](../SECURITY-AUDIT.md) untuk audit keamanan lengkap.
+
+### Security Features
+
+- ✅ Token-based authentication (Sanctum)
+- ✅ Password hashing (bcrypt)
+- ✅ Rate limiting (login: 5/min, API: 60/min)
+- ✅ CORS protection
+- ✅ SQL injection protection (Eloquent ORM)
+- ✅ XSS protection
+- ✅ CSRF protection
+- ✅ Security headers (X-Content-Type-Options, X-Frame-Options, etc.)
+- ✅ HTTPS enforcement (production)
+- ✅ Audit logging
+
+---
+
+## ⚡ Performance
+
+Lihat [PERFORMANCE-OPTIMIZATION.md](../PERFORMANCE-OPTIMIZATION.md) untuk optimasi performance.
+
+### Optimizations
+
+- ✅ Eager loading untuk menghindari N+1 queries
+- ✅ Database indexes untuk query optimization
+- ✅ Query optimization dengan select specific columns
+- ✅ Aggregated queries untuk statistics
+- ✅ Caching support (Redis/Memcached ready)
+
+---
+
+## 🚀 Deployment
+
+Lihat [DEPLOYMENT.md](./DEPLOYMENT.md) untuk panduan deployment lengkap.
+
+### Production Checklist
+
+- [ ] Set `APP_ENV=production`
+- [ ] Set `APP_DEBUG=false`
+- [ ] Generate `APP_KEY`
+- [ ] Setup database
+- [ ] Run migrations
+- [ ] Setup storage link
+- [ ] Configure CORS
+- [ ] Setup HTTPS
+- [ ] Configure queue workers (jika ada)
+- [ ] Setup backup schedule
+
+---
+
+## 📚 Dokumentasi Tambahan
+
+- [DATABASE.md](./DATABASE.md) - Database schema documentation
+- [API.md](./API.md) - API endpoints documentation
+- [FEATURES.md](./FEATURES.md) - Features documentation
+- [INSTALLATION.md](./INSTALLATION.md) - Installation guide
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - Deployment guide
+- [SUBSCRIPTION_IMPLEMENTATION.md](./SUBSCRIPTION_IMPLEMENTATION.md) - Subscription & Multi-Tenancy Implementation Guide
+- [SECURITY-AUDIT.md](../SECURITY-AUDIT.md) - Security audit
+- [PERFORMANCE-OPTIMIZATION.md](../PERFORMANCE-OPTIMIZATION.md) - Performance optimization
+
+---
+
+**Last Updated**: January 2025
+
