@@ -20,14 +20,17 @@ return [
     'allowed_methods' => ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
     'allowed_origins' => [
-        'https://kasir-pos.sunnflower.site', // Production frontend
-        'http://localhost:4173', // Local development
-        'http://127.0.0.1:4173', // Local development
+        'https://kasir-pos.sunnflower.site',
+        
         // Note: Electron app origins are handled by AllowElectronOrigin middleware
         // This allows Electron app to work without exposing localhost to web browser
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '/^exp:\/\/.*/', // Expo Go URLs (exp://host:port)
+        '/^http:\/\/192\.168\.\d+\.\d+:8081$/', // LAN IP addresses for Expo
+        '/^http:\/\/10\.\d+\.\d+\.\d+:8081$/', // Private network IPs for Expo
+    ],
 
     'allowed_headers' => [
         'Content-Type',

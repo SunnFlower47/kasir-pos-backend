@@ -28,6 +28,13 @@ return new class extends Migration
             $table->enum('status', ['pending', 'completed', 'cancelled', 'refunded'])->default('completed');
             $table->text('notes')->nullable();
             $table->timestamps();
+
+            // Performance indexes
+            $table->index('transaction_date');
+            $table->index('outlet_id');
+            $table->index(['outlet_id', 'transaction_date']);
+            $table->index('status');
+            $table->index('payment_method');
         });
     }
 

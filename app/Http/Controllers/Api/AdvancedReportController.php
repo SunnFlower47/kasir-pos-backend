@@ -18,6 +18,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 
 class AdvancedReportController extends Controller
 {
@@ -31,60 +32,121 @@ class AdvancedReportController extends Controller
             return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
         }
 
-        $request->validate([
-            'date_from' => 'nullable|date',
-            'date_to' => 'nullable|date|after_or_equal:date_from',
-            'outlet_id' => 'nullable|exists:outlets,id',
-            'period' => 'nullable|in:today,week,month,quarter,year,all',
-        ]);
+        try {
+            // If date_from and date_to are provided, period is optional
+            // Otherwise, period is required
+            $rules = [
+                'date_from' => 'nullable|date',
+                'date_to' => 'nullable|date|after_or_equal:date_from',
+                'outlet_id' => 'nullable|exists:outlets,id',
+            ];
+
+            // Only validate period if date_from and date_to are not both provided
+            if (!$request->has('date_from') || !$request->has('date_to')) {
+                $rules['period'] = 'nullable|in:today,week,month,quarter,year,all';
+            } else {
+                $rules['period'] = 'nullable|in:today,week,month,quarter,year,all,custom';
+            }
+
+            $request->validate($rules, [
+                'date_from.date' => 'Format tanggal awal tidak valid',
+                'date_to.date' => 'Format tanggal akhir tidak valid',
+                'date_to.after_or_equal' => 'Tanggal akhir harus sama atau setelah tanggal awal',
+                'outlet_id.exists' => 'Outlet yang dipilih tidak ditemukan',
+                'period.in' => 'Periode yang dipilih tidak valid'
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validasi gagal',
+                'errors' => $e->errors()
+            ], 422);
+        }
 
         $dateFrom = $request->date_from ?? now()->subDays(30)->format('Y-m-d');
         $dateTo = $request->date_to ?? now()->format('Y-m-d');
-        $outletId = $request->outlet_id;
+        $outletId = $request->outlet_id ? (int) $request->outlet_id : null;
 
-        // 1. KEY PERFORMANCE INDICATORS (KPIs)
-        $kpis = $this->calculateKPIs($dateFrom, $dateTo, $outletId);
+        try {
+            // 1. KEY PERFORMANCE INDICATORS (KPIs)
+            $kpis = $this->calculateKPIs($dateFrom, $dateTo, $outletId);
 
-        // 2. REVENUE ANALYTICS
-        $revenueAnalytics = $this->getRevenueAnalytics($dateFrom, $dateTo, $outletId);
+            // 2. REVENUE ANALYTICS
+            $revenueAnalytics = $this->getRevenueAnalytics($dateFrom, $dateTo, $outletId);
 
-        // 3. CUSTOMER ANALYTICS
-        $customerAnalytics = $this->getCustomerAnalytics($dateFrom, $dateTo, $outletId);
+            // 3. CUSTOMER ANALYTICS
+            $customerAnalytics = $this->getCustomerAnalytics($dateFrom, $dateTo, $outletId);
 
-        // 4. PRODUCT PERFORMANCE
-        $productAnalytics = $this->getProductAnalytics($dateFrom, $dateTo, $outletId);
+            // 4. PRODUCT PERFORMANCE
+            $productAnalytics = $this->getProductAnalytics($dateFrom, $dateTo, $outletId);
 
-        // 5. OPERATIONAL METRICS
-        $operationalMetrics = $this->getOperationalMetrics($dateFrom, $dateTo, $outletId);
+            // 5. OPERATIONAL METRICS
+            $operationalMetrics = $this->getOperationalMetrics($dateFrom, $dateTo, $outletId);
 
-        // 6. FINANCIAL HEALTH
-        $financialHealth = $this->getFinancialHealth($dateFrom, $dateTo, $outletId);
+            // 6. FINANCIAL HEALTH
+            $financialHealth = $this->getFinancialHealth($dateFrom, $dateTo, $outletId);
 
-        // 7. TREND ANALYSIS
-        $trendAnalysis = $this->getTrendAnalysis($dateFrom, $dateTo, $outletId);
+            // 7. TREND ANALYSIS
+            $trendAnalysis = $this->getTrendAnalysis($dateFrom, $dateTo, $outletId);
 
-        // 8. COMPARATIVE ANALYSIS
-        $comparativeAnalysis = $this->getComparativeAnalysis($dateFrom, $dateTo, $outletId);
+            // 8. COMPARATIVE ANALYSIS
+            $comparativeAnalysis = $this->getComparativeAnalysis($dateFrom, $dateTo, $outletId);
 
-        return response()->json([
-            'success' => true,
-            'data' => [
-                'kpis' => $kpis,
-                'revenue_analytics' => $revenueAnalytics,
-                'customer_analytics' => $customerAnalytics,
-                'product_analytics' => $productAnalytics,
-                'operational_metrics' => $operationalMetrics,
-                'financial_health' => $financialHealth,
-                'trend_analysis' => $trendAnalysis,
-                'comparative_analysis' => $comparativeAnalysis,
-                'report_metadata' => [
-                    'generated_at' => now()->toISOString(),
-                    'date_range' => ['from' => $dateFrom, 'to' => $dateTo],
-                    'outlet_id' => $outletId,
-                    'outlet_name' => $outletId ? Outlet::find($outletId)?->name : 'All Outlets'
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'kpis' => $kpis,
+                    'revenue_analytics' => $revenueAnalytics,
+                    'customer_analytics' => $customerAnalytics,
+                    'product_analytics' => $productAnalytics,
+                    'operational_metrics' => $operationalMetrics,
+                    'financial_health' => $financialHealth,
+                    'trend_analysis' => $trendAnalysis,
+                    'comparative_analysis' => $comparativeAnalysis,
+                    'report_metadata' => [
+                        'generated_at' => now()->toISOString(),
+                        'date_range' => ['from' => $dateFrom, 'to' => $dateTo],
+                        'outlet_id' => $outletId,
+                        'outlet_name' => $outletId ? Outlet::find($outletId)?->name : 'All Outlets'
+                    ]
                 ]
-            ]
-        ]);
+            ]);
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Log the error for debugging
+            Log::error('Business Intelligence Query Error', [
+                'error' => $e->getMessage(),
+                'sql' => $e->getSql(),
+                'bindings' => $e->getBindings(),
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'outlet_id' => $outletId,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat memproses data laporan',
+                'error' => app()->environment('local', 'development')
+                    ? $e->getMessage()
+                    : 'Database error occurred'
+            ], 500);
+        } catch (\Exception $e) {
+            // Log the error for debugging
+            Log::error('Business Intelligence Error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'outlet_id' => $outletId,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Terjadi kesalahan saat memproses data laporan',
+                'error' => app()->environment('local', 'development')
+                    ? $e->getMessage()
+                    : 'An error occurred while processing the report'
+            ], 500);
+        }
     }
 
     /**
@@ -690,11 +752,12 @@ class AdvancedReportController extends Controller
         })->values();
 
         // Staff performance (if user tracking is available) - buat query baru untuk menghindari reuse baseQuery
-        $staffPerformanceQuery = Transaction::where('status', 'completed')
-            ->whereBetween('transaction_date', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
+        // Apply outlet filter BEFORE join to avoid ambiguous column error
+        $staffPerformanceQuery = Transaction::where('transactions.status', 'completed')
+            ->whereBetween('transactions.transaction_date', [$dateFrom . ' 00:00:00', $dateTo . ' 23:59:59']);
 
         if ($outletId) {
-            $staffPerformanceQuery->where('outlet_id', $outletId);
+            $staffPerformanceQuery->where('transactions.outlet_id', $outletId);
         }
 
         $staffPerformance = $staffPerformanceQuery->join('users', 'transactions.user_id', '=', 'users.id')

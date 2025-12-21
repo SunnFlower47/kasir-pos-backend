@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 
 class SettingController extends Controller
 {
@@ -176,9 +177,15 @@ class SettingController extends Controller
                 'message' => 'Logo deleted successfully'
             ]);
         } catch (\Exception $e) {
+            Log::error('Failed to delete logo', [
+                'error' => $e->getMessage(),
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
+            ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete logo: ' . $e->getMessage()
+                'message' => app()->environment('production')
+                    ? 'Failed to delete logo. Please try again later.'
+                    : 'Failed to delete logo: ' . $e->getMessage()
             ], 500);
         }
     }

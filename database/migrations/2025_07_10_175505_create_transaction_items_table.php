@@ -20,6 +20,10 @@ return new class extends Migration
             $table->decimal('discount_amount', 15, 2)->default(0);
             $table->decimal('total_price', 15, 2);
             $table->timestamps();
+
+            // Performance indexes
+            $table->index('product_id');
+            $table->index(['transaction_id', 'product_id']);
         });
     }
 

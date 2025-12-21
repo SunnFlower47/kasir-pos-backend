@@ -59,7 +59,8 @@ class RolePermissionSeeder extends Seeder
             'audit-logs.view', 'audit-logs.delete',
 
             // Export/Import
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ];
 
         foreach ($permissions as $permission) {
@@ -106,7 +107,8 @@ class RolePermissionSeeder extends Seeder
             'settings.view',
             'promotions.view',
             'audit-logs.view',
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ]);
 
         // Manager - FULL ACCESS untuk operasional (kecuali kelola user dan outlet)
@@ -122,7 +124,8 @@ class RolePermissionSeeder extends Seeder
             'stocks.view', 'stocks.adjustment', 'stocks.transfer',
             'reports.sales', 'reports.purchases', 'reports.stocks', 'reports.profit',
             'promotions.view', 'promotions.create', 'promotions.edit', 'promotions.delete',
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ]);
 
         $cashier->syncPermissions([

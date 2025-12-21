@@ -292,6 +292,7 @@ Lihat [DEPLOYMENT.md](./DEPLOYMENT.md) untuk panduan deployment lengkap.
 - [FEATURES.md](./FEATURES.md) - Features documentation
 - [INSTALLATION.md](./INSTALLATION.md) - Installation guide
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Deployment guide
+- [SUBSCRIPTION_IMPLEMENTATION.md](./SUBSCRIPTION_IMPLEMENTATION.md) - Subscription & Multi-Tenancy Implementation Guide
 - [SECURITY-AUDIT.md](../SECURITY-AUDIT.md) - Security audit
 - [PERFORMANCE-OPTIMIZATION.md](../PERFORMANCE-OPTIMIZATION.md) - Performance optimization
 

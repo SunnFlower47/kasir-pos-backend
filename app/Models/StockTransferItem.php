@@ -16,6 +16,13 @@ class StockTransferItem extends Model
         'quantity',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'quantity' => 'decimal:3',
+        ];
+    }
+
     /**
      * Get the stock transfer that owns the stock transfer item.
      */

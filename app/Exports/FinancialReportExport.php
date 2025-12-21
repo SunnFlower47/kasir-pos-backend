@@ -63,21 +63,37 @@ class FinancialReportSummarySheet extends BaseReportSheet
     public function collection()
     {
         $summary = $this->data['summary'] ?? [];
-        
+
         return collect([
             [
-                'Periode' => ($this->data['period']['from'] ?? '') . ' s/d ' . ($this->data['period']['to'] ?? ''),
-                'Total Pendapatan' => number_format($summary['total_revenue'] ?? 0, 2, '.', ''),
-                'Total Refund' => number_format($summary['total_refunds'] ?? 0, 2, '.', ''),
-                'Pendapatan Bersih' => number_format($summary['net_revenue'] ?? 0, 2, '.', ''),
-                'Total Pengeluaran' => number_format($summary['total_expenses'] ?? 0, 2, '.', ''),
-                'Pengeluaran Pembelian' => number_format($summary['purchase_expenses'] ?? 0, 2, '.', ''),
-                'Pengeluaran Operasional' => number_format($summary['operational_expenses'] ?? 0, 2, '.', ''),
-                'Total HPP' => number_format($summary['total_cogs'] ?? 0, 2, '.', ''),
-                'Laba Kotor' => number_format($summary['gross_profit'] ?? 0, 2, '.', ''),
-                'Laba Bersih' => number_format($summary['net_profit'] ?? 0, 2, '.', ''),
+                'periode' => ($this->data['period']['from'] ?? '') . ' s/d ' . ($this->data['period']['to'] ?? ''),
+                'total_pendapatan' => (float)($summary['total_revenue'] ?? 0),
+                'total_refund' => (float)($summary['total_refunds'] ?? 0),
+                'pendapatan_bersih' => (float)($summary['net_revenue'] ?? 0),
+                'total_pengeluaran' => (float)($summary['total_expenses'] ?? 0),
+                'pengeluaran_pembelian' => (float)($summary['purchase_expenses'] ?? 0),
+                'pengeluaran_operasional' => (float)($summary['operational_expenses'] ?? 0),
+                'total_hpp' => (float)($summary['total_cogs'] ?? 0),
+                'laba_kotor' => (float)($summary['gross_profit'] ?? 0),
+                'laba_bersih' => (float)($summary['net_profit'] ?? 0),
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            $row['periode'] ?? '',
+            number_format($row['total_pendapatan'] ?? 0, 2, '.', ''),
+            number_format($row['total_refund'] ?? 0, 2, '.', ''),
+            number_format($row['pendapatan_bersih'] ?? 0, 2, '.', ''),
+            number_format($row['total_pengeluaran'] ?? 0, 2, '.', ''),
+            number_format($row['pengeluaran_pembelian'] ?? 0, 2, '.', ''),
+            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
+            number_format($row['total_hpp'] ?? 0, 2, '.', ''),
+            number_format($row['laba_kotor'] ?? 0, 2, '.', ''),
+            number_format($row['laba_bersih'] ?? 0, 2, '.', ''),
+        ];
     }
 
     public function headings(): array
@@ -114,16 +130,27 @@ class FinancialReportRevenueSheet extends BaseReportSheet
     public function collection()
     {
         $revenue = $this->data['revenue'] ?? [];
-        
+
         return collect([
             [
-                'Total Pendapatan' => number_format($revenue['total'] ?? 0, 2, '.', ''),
-                'Total Transaksi' => $revenue['transaction_count'] ?? 0,
-                'Rata-rata Transaksi' => number_format($revenue['avg_transaction_value'] ?? 0, 2, '.', ''),
-                'Total Refund' => number_format($revenue['refunds'] ?? 0, 2, '.', ''),
-                'Pendapatan Bersih' => number_format($revenue['net_revenue'] ?? 0, 2, '.', ''),
+                'total_pendapatan' => (float)($revenue['total'] ?? 0),
+                'total_transaksi' => (int)($revenue['transaction_count'] ?? 0),
+                'rata_transaksi' => (float)($revenue['avg_transaction_value'] ?? 0),
+                'total_refund' => (float)($revenue['refunds'] ?? 0),
+                'pendapatan_bersih' => (float)($revenue['net_revenue'] ?? 0),
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            number_format($row['total_pendapatan'] ?? 0, 2, '.', ''),
+            (int)($row['total_transaksi'] ?? 0),
+            number_format($row['rata_transaksi'] ?? 0, 2, '.', ''),
+            number_format($row['total_refund'] ?? 0, 2, '.', ''),
+            number_format($row['pendapatan_bersih'] ?? 0, 2, '.', ''),
+        ];
     }
 
     public function headings(): array
@@ -149,15 +176,25 @@ class FinancialReportExpensesSheet extends BaseReportSheet
     public function collection()
     {
         $expenses = $this->data['expenses'] ?? [];
-        
+
         return collect([
             [
-                'Total Pengeluaran' => number_format($expenses['total'] ?? 0, 2, '.', ''),
-                'Pengeluaran Pembelian' => number_format($expenses['purchase_expenses'] ?? 0, 2, '.', ''),
-                'Pengeluaran Operasional' => number_format($expenses['operational_expenses'] ?? 0, 2, '.', ''),
-                'Jumlah Pembelian' => $expenses['purchase_count'] ?? 0,
+                'total_pengeluaran' => (float)($expenses['total'] ?? 0),
+                'pengeluaran_pembelian' => (float)($expenses['purchase_expenses'] ?? 0),
+                'pengeluaran_operasional' => (float)($expenses['operational_expenses'] ?? 0),
+                'jumlah_pembelian' => (int)($expenses['purchase_count'] ?? 0),
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            number_format($row['total_pengeluaran'] ?? 0, 2, '.', ''),
+            number_format($row['pengeluaran_pembelian'] ?? 0, 2, '.', ''),
+            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
+            (int)($row['jumlah_pembelian'] ?? 0),
+        ];
     }
 
     public function headings(): array
@@ -183,17 +220,29 @@ class FinancialReportProfitLossSheet extends BaseReportSheet
     public function collection()
     {
         $profitLoss = $this->data['profit_loss'] ?? [];
-        
+
         return collect([
             [
-                'Laba Kotor' => number_format($profitLoss['gross_profit'] ?? 0, 2, '.', ''),
-                'Laba Bersih' => number_format($profitLoss['net_profit'] ?? 0, 2, '.', ''),
-                'Pengeluaran Operasional' => number_format($profitLoss['operating_expenses'] ?? 0, 2, '.', ''),
-                'Margin Laba Kotor' => number_format($profitLoss['gross_profit_margin'] ?? 0, 2, '.', '') . '%',
-                'Margin Laba Bersih' => number_format($profitLoss['net_profit_margin'] ?? 0, 2, '.', '') . '%',
-                'Menguntungkan' => ($profitLoss['is_profitable'] ?? false) ? 'Ya' : 'Tidak',
+                'laba_kotor' => (float)($profitLoss['gross_profit'] ?? 0),
+                'laba_bersih' => (float)($profitLoss['net_profit'] ?? 0),
+                'pengeluaran_operasional' => (float)($profitLoss['operating_expenses'] ?? 0),
+                'margin_laba_kotor' => (float)($profitLoss['gross_profit_margin'] ?? 0),
+                'margin_laba_bersih' => (float)($profitLoss['net_profit_margin'] ?? 0),
+                'menguntungkan' => ($profitLoss['is_profitable'] ?? false) ? 'Ya' : 'Tidak',
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            number_format($row['laba_kotor'] ?? 0, 2, '.', ''),
+            number_format($row['laba_bersih'] ?? 0, 2, '.', ''),
+            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
+            number_format($row['margin_laba_kotor'] ?? 0, 2, '.', '') . '%',
+            number_format($row['margin_laba_bersih'] ?? 0, 2, '.', '') . '%',
+            $row['menguntungkan'] ?? 'Tidak',
+        ];
     }
 
     public function headings(): array

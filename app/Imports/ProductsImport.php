@@ -122,7 +122,7 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
                 'purchase_price' => (float) $purchasePrice,
                 'selling_price' => (float) $sellingPrice,
                 'wholesale_price' => !empty($wholesalePrice) && is_numeric($wholesalePrice) ? (float) $wholesalePrice : 0,
-                'min_stock' => !empty($minStock) && is_numeric($minStock) ? (int) $minStock : 0,
+                'min_stock' => !empty($minStock) && is_numeric($minStock) ? (float) $minStock : 0,
                 'description' => !empty($description) ? trim($description) : null,
                 'is_active' => $isActiveValue,
             ];
@@ -143,7 +143,7 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
         } catch (\Exception $e) {
             $this->failedCount++;
             $this->errors[] = $e->getMessage();
-            
+
             if ($this->previewMode) {
                 $this->invalidRows[] = [
                     'row' => $this->rowCount,

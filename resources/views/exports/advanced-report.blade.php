@@ -59,15 +59,15 @@
         <table>
             <tr>
                 <th>Total Revenue</th>
-                <td>Rp {{ number_format($data['kpis']['total_revenue'] ?? 0, 0, ',', '.') }}</td>
+                <td>Rp {{ number_format((float)($data['kpis']['revenue']['net_revenue'] ?? $data['kpis']['revenue']['total'] ?? 0), 0, ',', '.') }}</td>
             </tr>
             <tr>
                 <th>Total Transactions</th>
-                <td>{{ number_format($data['kpis']['total_transactions'] ?? 0, 0, ',', '.') }}</td>
+                <td>{{ number_format((float)($data['kpis']['transactions']['current'] ?? 0), 0, ',', '.') }}</td>
             </tr>
             <tr>
                 <th>Average Transaction Value</th>
-                <td>Rp {{ number_format($data['kpis']['avg_transaction_value'] ?? 0, 0, ',', '.') }}</td>
+                <td>Rp {{ number_format((float)($data['kpis']['avg_transaction_value']['current'] ?? 0), 0, ',', '.') }}</td>
             </tr>
         </table>
     </div>

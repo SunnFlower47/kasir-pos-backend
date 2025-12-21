@@ -24,6 +24,15 @@ class StockMovement extends Model
         'user_id',
     ];
 
+    protected function casts(): array
+    {
+        return [
+            'quantity' => 'decimal:3',
+            'quantity_before' => 'decimal:3',
+            'quantity_after' => 'decimal:3',
+        ];
+    }
+
     /**
      * Get the product that owns the stock movement.
      */

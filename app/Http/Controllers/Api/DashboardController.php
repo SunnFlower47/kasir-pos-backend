@@ -88,34 +88,37 @@ class DashboardController extends Controller
             'todayEnd' => $todayEnd,
         ]);
 
-        // Completed transactions stats - Use separate queries for better reliability
+        // Completed transactions stats - Optimized queries with database aggregation
         try {
-            // Today's stats
-            $todayCompleted = (clone $completedQuery)
+            // Today's stats - use database aggregation instead of PHP sum()
+            $todayStats = (clone $completedQuery)
                 ->whereBetween('transaction_date', [$todayStart, $todayEnd])
-                ->get();
-            $transactionsToday = $todayCompleted->count();
-            $revenueToday = $todayCompleted->sum('total_amount');
+                ->selectRaw('COUNT(*) as transactions_count, COALESCE(SUM(total_amount), 0) as revenue_sum')
+                ->first();
+            $transactionsToday = (int) ($todayStats->transactions_count ?? 0);
+            $revenueToday = (float) ($todayStats->revenue_sum ?? 0);
 
-            // This month's stats
-            $thisMonthCompleted = (clone $completedQuery)
+            // This month's stats - use database aggregation
+            $thisMonthStats = (clone $completedQuery)
                 ->where('transaction_date', '>=', $thisMonthStart)
-                ->get();
-            $transactionsThisMonth = $thisMonthCompleted->count();
-            $revenueThisMonth = $thisMonthCompleted->sum('total_amount');
+                ->selectRaw('COUNT(*) as transactions_count, COALESCE(SUM(total_amount), 0) as revenue_sum')
+                ->first();
+            $transactionsThisMonth = (int) ($thisMonthStats->transactions_count ?? 0);
+            $revenueThisMonth = (float) ($thisMonthStats->revenue_sum ?? 0);
 
-            // Last month's stats
-            $lastMonthCompleted = (clone $completedQuery)
+            // Last month's stats - use database aggregation
+            $lastMonthStats = (clone $completedQuery)
                 ->whereBetween('transaction_date', [$lastMonthStart, $thisMonthStart])
-                ->get();
-            $revenueLastMonth = $lastMonthCompleted->sum('total_amount');
+                ->selectRaw('COALESCE(SUM(total_amount), 0) as revenue_sum')
+                ->first();
+            $revenueLastMonth = (float) ($lastMonthStats->revenue_sum ?? 0);
 
             $completedStats = (object)[
                 'transactions_today' => $transactionsToday,
-                'revenue_today' => (float) $revenueToday,
+                'revenue_today' => $revenueToday,
                 'transactions_this_month' => $transactionsThisMonth,
-                'revenue_this_month' => (float) $revenueThisMonth,
-                'revenue_last_month' => (float) $revenueLastMonth,
+                'revenue_this_month' => $revenueThisMonth,
+                'revenue_last_month' => $revenueLastMonth,
             ];
 
             \Illuminate\Support\Facades\Log::info('Completed stats calculated', [
@@ -236,7 +239,9 @@ class DashboardController extends Controller
         }
 
         $stockStats = [
+            // Low stock: quantity > 0 AND quantity <= min_stock (exclude out of stock)
             'low_stock_products' => (clone $stockQuery)
+                ->where('product_stocks.quantity', '>', 0)
                 ->whereRaw('product_stocks.quantity <= products.min_stock')
                 ->count(),
             'out_of_stock_products' => (clone $stockQuery)
@@ -276,9 +281,11 @@ class DashboardController extends Controller
         }
         $topProducts = $topProductsQuery->get();
 
-        // Low stock products - Get ALL low stock products, not just 10
+        // Low stock products - Get ALL low stock products (exclude out of stock)
+        // Low stock = quantity > 0 AND quantity <= min_stock
         $lowStockQuery = ProductStock::with(['product', 'outlet'])
             ->join('products', 'product_stocks.product_id', '=', 'products.id')
+            ->where('product_stocks.quantity', '>', 0) // Exclude out of stock
             ->whereRaw('product_stocks.quantity <= products.min_stock')
             ->select('product_stocks.*')
             ->orderBy('product_stocks.quantity', 'asc');
@@ -398,6 +405,7 @@ class DashboardController extends Controller
                 'active_users' => $outlet->users()->where('is_active', true)->count(),
                 'low_stock_products' => $outlet->productStocks()
                     ->join('products', 'product_stocks.product_id', '=', 'products.id')
+                    ->where('product_stocks.quantity', '>', 0) // Exclude out of stock
                     ->whereRaw('product_stocks.quantity <= products.min_stock')
                     ->count(),
             ];

@@ -34,6 +34,7 @@ class Product extends Model
             'purchase_price' => 'decimal:2',
             'selling_price' => 'decimal:2',
             'wholesale_price' => 'decimal:2',
+            'min_stock' => 'decimal:3',
             'is_active' => 'boolean',
         ];
     }
@@ -105,10 +106,10 @@ class Product extends Model
     /**
      * Get stock quantity for specific outlet
      */
-    public function getStockQuantity(int $outletId): int
+    public function getStockQuantity(int $outletId): float|int
     {
         $stock = $this->productStocks()->where('outlet_id', $outletId)->first();
-        return $stock ? $stock->quantity : 0;
+        return $stock ? (float) $stock->quantity : 0.0;
     }
 
     /**

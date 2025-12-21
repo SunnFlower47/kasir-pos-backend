@@ -134,7 +134,9 @@ class ApiExceptionHandler
         return response()->json([
             'success' => false,
             'message' => 'Database error',
-            'error' => $errorMessage,
+            'error' => app()->environment('production')
+                ? 'A database error occurred. Please try again later.'
+                : $errorMessage,
         ], 500);
     }
 

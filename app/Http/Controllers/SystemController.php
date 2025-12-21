@@ -354,18 +354,297 @@ class SystemController extends Controller
 
     private function createMySQLBackup($config, $fullPath)
     {
+        // Try to find mysqldump in common locations
+        $mysqldumpPath = $this->findMySQLDump();
+
+        // Create temporary error log file
+        $errorLogPath = $fullPath . '.error.log';
+
+        // Build command - redirect stdout to backup file, stderr to error log
         $command = sprintf(
-            'mysqldump --host=%s --port=%s --user=%s --password=%s --single-transaction --routines --triggers %s > %s',
+            '%s --host=%s --port=%s --user=%s --password=%s --single-transaction --routines --triggers %s > %s 2> %s',
+            escapeshellarg($mysqldumpPath),
             escapeshellarg($config['host']),
             escapeshellarg($config['port'] ?? 3306),
             escapeshellarg($config['username']),
             escapeshellarg($config['password']),
             escapeshellarg($config['database']),
-            escapeshellarg($fullPath)
+            escapeshellarg($fullPath),
+            escapeshellarg($errorLogPath)
         );
 
+        // Log command without password for debugging
+        $logCommand = sprintf(
+            '%s --host=%s --port=%s --user=%s --password=*** --single-transaction --routines --triggers %s > %s 2> %s',
+            escapeshellarg($mysqldumpPath),
+            escapeshellarg($config['host']),
+            escapeshellarg($config['port'] ?? 3306),
+            escapeshellarg($config['username']),
+            escapeshellarg($config['database']),
+            escapeshellarg($fullPath),
+            escapeshellarg($errorLogPath)
+        );
+        Log::info('Executing mysqldump command: ' . $logCommand);
+        Log::info('mysqldump path: ' . $mysqldumpPath);
+
         exec($command, $output, $returnCode);
-        return $returnCode === 0;
+
+        // Check for errors
+        $errorMessage = '';
+        $hasError = false;
+
+        // Read error log if it exists
+        if (file_exists($errorLogPath)) {
+            $errorContent = file_get_contents($errorLogPath);
+            if (!empty(trim($errorContent))) {
+                $errorMessage = trim($errorContent);
+                $hasError = true;
+                Log::error('mysqldump stderr: ' . $errorMessage);
+            }
+            @unlink($errorLogPath); // Clean up error log
+        }
+
+        // Check if backup file exists and has content
+        $fileExists = file_exists($fullPath);
+        $fileSize = $fileExists ? filesize($fullPath) : 0;
+
+        // Check if backup file contains error messages (sometimes errors go to stdout)
+        if ($fileExists && $fileSize > 0) {
+            $fileContent = file_get_contents($fullPath, false, null, 0, 500); // Read first 500 bytes
+            if (stripos($fileContent, 'error') !== false ||
+                stripos($fileContent, 'access denied') !== false ||
+                stripos($fileContent, 'cannot connect') !== false) {
+                $hasError = true;
+                if (empty($errorMessage)) {
+                    $errorMessage = 'Backup file contains error messages. Check file content.';
+                }
+            }
+        }
+
+        // Check return code and file status
+        if ($returnCode !== 0 || $hasError || !$fileExists || $fileSize === 0) {
+            if (empty($errorMessage)) {
+                if ($returnCode !== 0) {
+                    $errorMessage = "mysqldump returned error code: {$returnCode}";
+                } elseif (!$fileExists) {
+                    $errorMessage = "Backup file was not created";
+                } elseif ($fileSize === 0) {
+                    $errorMessage = "Backup file is empty";
+                } else {
+                    $errorMessage = "Unknown error occurred";
+                }
+            }
+
+            Log::warning('mysqldump failed, trying Laravel DB backup method...');
+            Log::warning('mysqldump error: ' . $errorMessage);
+
+            // Clean up empty or invalid backup file
+            if ($fileExists && ($fileSize === 0 || $hasError)) {
+                @unlink($fullPath);
+            }
+
+            // Fallback to Laravel DB backup method
+            return $this->createMySQLBackupViaLaravel($config, $fullPath);
+        }
+
+        Log::info('mysqldump completed successfully. Backup size: ' . $fileSize . ' bytes');
+        return true;
+    }
+
+    /**
+     * Create MySQL backup using Laravel DB connection (fallback method)
+     * This method works even if mysqldump is not available
+     */
+    private function createMySQLBackupViaLaravel($config, $fullPath)
+    {
+        try {
+            Log::info('Starting Laravel DB backup method...');
+
+            $handle = fopen($fullPath, 'w');
+            if (!$handle) {
+                Log::error('Failed to open backup file for writing: ' . $fullPath);
+                return false;
+            }
+
+            // Write SQL header
+            fwrite($handle, "-- MySQL dump via Laravel DB Connection\n");
+            fwrite($handle, "-- Generated: " . date('Y-m-d H:i:s') . "\n");
+            fwrite($handle, "-- Database: {$config['database']}\n");
+            fwrite($handle, "SET SQL_MODE = \"NO_AUTO_VALUE_ON_ZERO\";\n");
+            fwrite($handle, "SET time_zone = \"+00:00\";\n\n");
+            fwrite($handle, "/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n");
+            fwrite($handle, "/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;\n");
+            fwrite($handle, "/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;\n");
+            fwrite($handle, "/*!40101 SET NAMES utf8mb4 */;\n\n");
+
+            // Get all tables
+            $tables = DB::select('SHOW TABLES');
+            $databaseName = $config['database'];
+            $tableKey = "Tables_in_{$databaseName}";
+
+            $tableCount = 0;
+            foreach ($tables as $table) {
+                $tableName = $table->$tableKey;
+                $tableCount++;
+
+                Log::info("Backing up table {$tableCount}: {$tableName}");
+
+                // Drop table statement
+                fwrite($handle, "\n-- --------------------------------------------------------\n");
+                fwrite($handle, "-- Table structure for table `{$tableName}`\n");
+                fwrite($handle, "-- --------------------------------------------------------\n\n");
+                fwrite($handle, "DROP TABLE IF EXISTS `{$tableName}`;\n");
+
+                // Get table structure
+                $createTable = DB::select("SHOW CREATE TABLE `{$tableName}`");
+                if (!empty($createTable)) {
+                    $createStatement = $createTable[0]->{'Create Table'};
+                    fwrite($handle, $createStatement . ";\n\n");
+                }
+
+                // Get table data using chunk to avoid memory issues
+                $rowCount = DB::table($tableName)->count();
+                if ($rowCount > 0) {
+                    fwrite($handle, "-- Dumping data for table `{$tableName}`\n\n");
+                    fwrite($handle, "LOCK TABLES `{$tableName}` WRITE;\n");
+                    fwrite($handle, "/*!40000 ALTER TABLE `{$tableName}` DISABLE KEYS */;\n\n");
+
+                    // Get column names
+                    $columns = DB::select("SHOW COLUMNS FROM `{$tableName}`");
+                    $columnNames = array_map(function($col) {
+                        return $col->Field;
+                    }, $columns);
+
+                    // Write INSERT statements in chunks to avoid memory issues
+                    $chunkSize = 100;
+                    $offset = 0;
+                    while (true) {
+                        $rows = DB::table($tableName)->skip($offset)->take($chunkSize)->get();
+                        if ($rows->isEmpty()) {
+                            break;
+                        }
+
+                        foreach ($rows as $row) {
+                            $values = [];
+                            foreach ($columnNames as $col) {
+                                $value = $row->$col;
+                                if ($value === null) {
+                                    $values[] = 'NULL';
+                                } elseif (is_numeric($value) && !is_string($value)) {
+                                    $values[] = $value;
+                                } else {
+                                    // Properly escape string values
+                                    $escaped = str_replace(['\\', "\x00", "\n", "\r", "'", '"', "\x1a"], ['\\\\', '\\0', '\\n', '\\r', "\\'", '\\"', '\\Z'], (string)$value);
+                                    $values[] = "'" . $escaped . "'";
+                                }
+                            }
+                            fwrite($handle, "INSERT INTO `{$tableName}` (`" . implode('`, `', $columnNames) . "`) VALUES (" . implode(', ', $values) . ");\n");
+                        }
+
+                        $offset += $chunkSize;
+                        if ($rows->count() < $chunkSize) {
+                            break;
+                        }
+                    }
+
+                    fwrite($handle, "\n/*!40000 ALTER TABLE `{$tableName}` ENABLE KEYS */;\n");
+                    fwrite($handle, "UNLOCK TABLES;\n\n");
+                } else {
+                    fwrite($handle, "-- No data in table `{$tableName}`\n\n");
+                }
+            }
+
+            // Write footer
+            fwrite($handle, "/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;\n");
+            fwrite($handle, "/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;\n");
+            fwrite($handle, "/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n");
+
+            fclose($handle);
+
+            $fileSize = filesize($fullPath);
+            Log::info("Laravel DB backup completed successfully. Tables: {$tableCount}, Size: {$fileSize} bytes");
+
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Laravel DB backup failed: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+
+            // Clean up file if it exists
+            if (file_exists($fullPath)) {
+                @unlink($fullPath);
+            }
+
+            return false;
+        }
+    }
+
+    /**
+     * Find mysqldump executable path
+     */
+    private function findMySQLDump()
+    {
+        // Common paths for mysqldump
+        $commonPaths = [
+            'mysqldump', // Try PATH first
+            '/usr/bin/mysqldump',
+            '/usr/local/bin/mysqldump',
+            '/usr/local/mysql/bin/mysqldump',
+            '/usr/local/mysql5/bin/mysqldump',
+            '/opt/lampp/bin/mysqldump',
+            '/xampp/mysql/bin/mysqldump',
+            '/Applications/XAMPP/xamppfiles/bin/mysqldump',
+        ];
+
+        // Try to find mysqldump in cPanel PHP paths (for shared hosting)
+        $cpanelPaths = glob('/opt/cpanel/ea-php*/root/usr/bin/mysqldump');
+        if (!empty($cpanelPaths)) {
+            $commonPaths = array_merge($commonPaths, $cpanelPaths);
+        }
+
+        foreach ($commonPaths as $path) {
+            // Check if it's in PATH or absolute path exists
+            if ($path === 'mysqldump') {
+                $testCommand = 'which mysqldump 2>/dev/null || command -v mysqldump 2>/dev/null';
+                exec($testCommand, $whichOutput, $whichCode);
+                if ($whichCode === 0 && !empty($whichOutput)) {
+                    $foundPath = trim($whichOutput[0]);
+                    // Test if it's actually executable
+                    if ($this->testMySQLDump($foundPath)) {
+                        Log::info('Found mysqldump in PATH: ' . $foundPath);
+                        return $foundPath;
+                    }
+                }
+            } else {
+                if (file_exists($path) && is_executable($path)) {
+                    // Test if it's actually working
+                    if ($this->testMySQLDump($path)) {
+                        Log::info('Found mysqldump at: ' . $path);
+                        return $path;
+                    }
+                }
+            }
+        }
+
+        // Default to 'mysqldump' and let exec handle it
+        Log::warning('mysqldump not found in common paths, using default: mysqldump');
+        return 'mysqldump';
+    }
+
+    /**
+     * Test if mysqldump is executable and working
+     */
+    private function testMySQLDump($path)
+    {
+        // Test by running mysqldump --version
+        $testCommand = escapeshellarg($path) . ' --version 2>&1';
+        exec($testCommand, $testOutput, $testCode);
+
+        if ($testCode === 0 && !empty($testOutput)) {
+            Log::info('mysqldump test successful: ' . implode(' ', $testOutput));
+            return true;
+        }
+
+        return false;
     }
 
     private function createPostgreSQLBackup($config, $fullPath)

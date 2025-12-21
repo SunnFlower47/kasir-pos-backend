@@ -38,7 +38,7 @@ class StoreTransactionRequest extends FormRequest
             // Transaction items
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.unit_price' => 'nullable|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
         ];
@@ -64,7 +64,7 @@ class StoreTransactionRequest extends FormRequest
             'items.*.product_id.required' => 'Product is required for each item',
             'items.*.product_id.exists' => 'Selected product does not exist',
             'items.*.quantity.required' => 'Quantity is required for each item',
-            'items.*.quantity.min' => 'Quantity must be at least 1',
+            'items.*.quantity.min' => 'Quantity must be greater than 0',
         ];
     }
 
@@ -83,10 +83,10 @@ class StoreTransactionRequest extends FormRequest
                 foreach ($this->items as $item) {
                     // Use the unit_price sent from frontend (respects wholesale price selection)
                     // Only fallback to product selling_price if unit_price is not provided
-                    $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0 
-                        ? (float) $item['unit_price'] 
+                    $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0
+                        ? (float) $item['unit_price']
                         : null;
-                    
+
                     if ($unitPrice === null && isset($item['product_id'])) {
                         $product = Product::find($item['product_id']);
                         $unitPrice = $product?->selling_price ?? 0;

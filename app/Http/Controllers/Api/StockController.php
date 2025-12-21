@@ -105,7 +105,7 @@ class StockController extends Controller
         $request->validate([
             'product_id' => 'required|exists:products,id',
             'outlet_id' => 'required|exists:outlets,id',
-            'new_quantity' => 'required|integer|min:0',
+            'new_quantity' => 'required|numeric|min:0',
             'notes' => 'nullable|string',
         ]);
 
@@ -323,7 +323,7 @@ class StockController extends Controller
             'notes' => 'nullable|string|max:500',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.unit_cost' => 'required|numeric|min:0',
             'items.*.notes' => 'nullable|string|max:255'
         ]);
@@ -397,7 +397,7 @@ class StockController extends Controller
             'to_outlet_id' => 'required|exists:outlets,id|different:from_outlet_id',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|integer|min:1',
+            'items.*.quantity' => 'required|numeric|min:0.001',
             'notes' => 'nullable|string|max:500'
         ]);
 
@@ -415,22 +415,29 @@ class StockController extends Controller
             ]);
 
             foreach ($request->items as $item) {
-                // Check source stock
+                // Check source stock with lock to prevent race conditions
                 $sourceStock = ProductStock::where('product_id', $item['product_id'])
                                          ->where('outlet_id', $request->from_outlet_id)
+                                         ->lockForUpdate()
                                          ->first();
 
                 if (!$sourceStock || $sourceStock->quantity < $item['quantity']) {
                     throw new \Exception("Insufficient stock for product ID {$item['product_id']} at source outlet");
                 }
 
-                // Get or create destination stock
-                $destStock = ProductStock::firstOrCreate([
-                    'product_id' => $item['product_id'],
-                    'outlet_id' => $request->to_outlet_id
-                ], [
-                    'quantity' => 0
-                ]);
+                // Get or create destination stock with lock
+                $destStock = ProductStock::where('product_id', $item['product_id'])
+                                        ->where('outlet_id', $request->to_outlet_id)
+                                        ->lockForUpdate()
+                                        ->first();
+
+                if (!$destStock) {
+                    $destStock = ProductStock::create([
+                        'product_id' => $item['product_id'],
+                        'outlet_id' => $request->to_outlet_id,
+                        'quantity' => 0
+                    ]);
+                }
 
                 // Record transfer item
                 StockTransferItem::create([
@@ -439,39 +446,25 @@ class StockController extends Controller
                     'quantity' => $item['quantity']
                 ]);
 
-                // Update stocks
-                $sourceStock->quantity -= $item['quantity'];
-                $sourceStock->save();
+                // Use standardized stock update methods to ensure consistency
+                $oldSourceQuantity = $sourceStock->quantity;
+                $sourceStock->reduceStock(
+                    $item['quantity'],
+                    'transfer',
+                    StockTransfer::class,
+                    $transfer->id,
+                    "Transfer out to outlet {$request->to_outlet_id} - {$transfer->transfer_number}"
+                );
 
-                $destStock->quantity += $item['quantity'];
-                $destStock->save();
+                $destStock->addStock(
+                    $item['quantity'],
+                    'transfer',
+                    StockTransfer::class,
+                    $transfer->id,
+                    "Transfer in from outlet {$request->from_outlet_id} - {$transfer->transfer_number}"
+                );
 
-                // Create movement records
-                StockMovement::create([
-                    'product_id' => $item['product_id'],
-                    'outlet_id' => $request->from_outlet_id,
-                    'type' => 'out',
-                    'quantity' => -$item['quantity'],
-                    'quantity_before' => $sourceStock->quantity + $item['quantity'],
-                    'quantity_after' => $sourceStock->quantity,
-                    'notes' => "Transfer out to outlet {$request->to_outlet_id} - {$transfer->transfer_number}",
-                    'user_id' => $user->id,
-                    'reference_type' => StockTransfer::class,
-                    'reference_id' => $transfer->id
-                ]);
-
-                StockMovement::create([
-                    'product_id' => $item['product_id'],
-                    'outlet_id' => $request->to_outlet_id,
-                    'type' => 'in',
-                    'quantity' => $item['quantity'],
-                    'quantity_before' => $destStock->quantity - $item['quantity'],
-                    'quantity_after' => $destStock->quantity,
-                    'notes' => "Transfer in from outlet {$request->from_outlet_id} - {$transfer->transfer_number}",
-                    'user_id' => $user->id,
-                    'reference_type' => StockTransfer::class,
-                    'reference_id' => $transfer->id
-                ]);
+                // Note: Movement records are now created automatically by addStock/reduceStock methods
             }
 
             DB::commit();
@@ -494,25 +487,31 @@ class StockController extends Controller
     }
 
     /**
-     * Get low stock alerts
+     * Get low stock alerts (includes out of stock items)
      */
     public function lowStockAlerts(Request $request): JsonResponse
     {
         /** @var User $user */
 
         $user = Auth::user();
-        $query = ProductStock::with(['product', 'outlet'])
-                            ->whereRaw('quantity <= (SELECT min_stock FROM products WHERE products.id = product_stocks.product_id)')
-                            ->where('quantity', '>', 0);
+        // Get items where quantity <= min_stock (includes out of stock where quantity = 0)
+        $query = ProductStock::with(['product.category', 'product.unit', 'outlet'])
+                            ->join('products', 'product_stocks.product_id', '=', 'products.id')
+                            ->whereRaw('product_stocks.quantity <= products.min_stock')
+                            ->select('product_stocks.*')
+                            ->where('products.is_active', true); // Only active products
 
         // Filter by user's outlet if not admin
         if ($user && $user->outlet_id) {
-            $query->where('outlet_id', $user->outlet_id);
+            $query->where('product_stocks.outlet_id', $user->outlet_id);
         } elseif ($request->has('outlet_id')) {
-            $query->where('outlet_id', $request->outlet_id);
+            $query->where('product_stocks.outlet_id', $request->outlet_id);
         }
 
-        $lowStocks = $query->orderBy('quantity', 'asc')->get();
+        // Order by quantity (out of stock first, then low stock)
+        $lowStocks = $query->orderBy('product_stocks.quantity', 'asc')
+                          ->orderBy('products.name', 'asc')
+                          ->get();
 
         return response()->json([
             'success' => true,

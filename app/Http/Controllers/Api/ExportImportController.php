@@ -45,7 +45,7 @@ class ExportImportController extends Controller
         $filename = $this->generateFilename($type, $params);
 
         try {
-            return match($type) {
+            $response = match($type) {
                 'products' => Excel::download(new ProductsExport($params), $filename),
                 'sales-report' => Excel::download(new SalesReportExport($params), $filename),
                 'financial-report' => Excel::download(new FinancialReportExport($params), $filename),
@@ -56,7 +56,16 @@ class ExportImportController extends Controller
                     'message' => 'Export type not found'
                 ], 404)
             };
+
+            // Add CORS headers for file download
+            return $this->addCorsHeaders($response, $request);
         } catch (\Exception $e) {
+            \Illuminate\Support\Facades\Log::error('Excel Export Error', [
+                'type' => $type,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json([
                 'success' => false,
                 'message' => 'Export failed: ' . $e->getMessage()
@@ -104,7 +113,10 @@ class ExportImportController extends Controller
             $pdf = Pdf::loadView($view, $data);
             $filename = $this->generateFilename($type, $params, 'pdf');
 
-            return $pdf->download($filename);
+            $response = $pdf->download($filename);
+
+            // Add CORS headers for file download
+            return $this->addCorsHeaders($response, $request);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -117,7 +129,7 @@ class ExportImportController extends Controller
      * Download template Excel untuk import
      * GET /api/v1/export/template/{type}
      */
-    public function downloadTemplate(string $type): \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
+    public function downloadTemplate(Request $request, string $type): \Symfony\Component\HttpFoundation\BinaryFileResponse|\Illuminate\Http\JsonResponse
     {
         /** @var User $user */
         $user = Auth::user();
@@ -137,13 +149,16 @@ class ExportImportController extends Controller
         }
 
         try {
-            return match($type) {
+            $response = match($type) {
                 'products' => Excel::download(new ProductsExport(['template' => true]), 'template_import_products_' . date('Ymd') . '.xlsx'),
                 default => response()->json([
                     'success' => false,
                     'message' => 'Template type not found'
                 ], 404)
             };
+
+            // Add CORS headers for file download
+            return $this->addCorsHeaders($response, $request);
         } catch (\Exception $e) {
             return response()->json([
                 'success' => false,
@@ -344,7 +359,7 @@ class ExportImportController extends Controller
     {
         $import = new ProductsImport();
         $import->setPreviewMode(true);
-        
+
         try {
             Excel::import($import, $file);
         } catch (\Exception $e) {
@@ -358,6 +373,29 @@ class ExportImportController extends Controller
             'preview_data' => $import->getPreviewData(),
             'errors' => $import->getErrors()
         ];
+    }
+
+    /**
+     * Helper: Add CORS headers to response
+     */
+    private function addCorsHeaders($response, Request $request)
+    {
+        $origin = $request->header('Origin');
+
+        // Allowed origins
+        $allowed = [
+            'https://kasir-pos.sunnflower.site',
+            'http://localhost:4173',
+            'http://127.0.0.1:4173',
+        ];
+
+        if ($origin && in_array($origin, $allowed)) {
+            $response->headers->set('Access-Control-Allow-Origin', $origin);
+            $response->headers->set('Access-Control-Allow-Credentials', 'true');
+            $response->headers->set('Access-Control-Expose-Headers', 'Content-Disposition');
+        }
+
+        return $response;
     }
 }
 

@@ -19,6 +19,10 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['product_id', 'outlet_id']);
+
+            // Additional performance indexes (unique constraint already indexes product_id + outlet_id)
+            $table->index('product_id');
+            $table->index('outlet_id');
         });
     }
 

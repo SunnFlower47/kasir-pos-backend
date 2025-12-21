@@ -27,7 +27,7 @@ class TransactionItem extends Model
             'purchase_price' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'total_price' => 'decimal:2',
-            'quantity' => 'integer',
+            'quantity' => 'decimal:3',
             'transaction_id' => 'integer',
             'product_id' => 'integer',
         ];

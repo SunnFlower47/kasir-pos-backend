@@ -29,13 +29,14 @@ return Application::configure(basePath: dirname(__DIR__))
         // CORS FIRST - handle OPTIONS before anything else
         $middleware->prepend(\App\Http\Middleware\HandleCors::class);
 
-        // Minimal security - only if needed
-        // ForceHttps and SecurityHeaders disabled sementara untuk simplify
-        // if (app()->environment('production')) {
-        //     $middleware->append(\App\Http\Middleware\ForceHttps::class);
-        // }
-        // $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
-        // $middleware->append(\App\Http\Middleware\AllowElectronOrigin::class);
+        // Security headers - enable in all environments
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+
+        // Force HTTPS only in production
+        // Use env() directly instead of app()->environment() to avoid reflection error
+        if (env('APP_ENV') === 'production') {
+            $middleware->append(\App\Http\Middleware\ForceHttps::class);
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle API routes - return JSON responses

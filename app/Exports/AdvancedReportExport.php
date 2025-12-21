@@ -60,16 +60,33 @@ class AdvancedReportKPIsSheet extends BaseReportSheet
     public function collection()
     {
         $kpis = $this->data['kpis'] ?? [];
-        
+
+        $revenue = $kpis['revenue']['net_revenue'] ?? $kpis['revenue']['total'] ?? 0;
+        $transactions = $kpis['transactions']['current'] ?? 0;
+        $avgValue = $kpis['avg_transaction_value']['current'] ?? 0;
+        $customers = $kpis['customers']['active'] ?? 0;
+        $growthRate = $kpis['revenue']['growth_rate'] ?? 0;
+
         return collect([
             [
-                'Total Revenue' => number_format($kpis['total_revenue'] ?? 0, 2, '.', ''),
-                'Total Transactions' => $kpis['total_transactions'] ?? 0,
-                'Average Transaction Value' => number_format($kpis['avg_transaction_value'] ?? 0, 2, '.', ''),
-                'Total Customers' => $kpis['total_customers'] ?? 0,
-                'Growth Rate' => number_format($kpis['growth_rate'] ?? 0, 2, '.', '') . '%',
+                'total_revenue' => (float)$revenue,
+                'total_transactions' => (int)$transactions,
+                'avg_transaction_value' => (float)$avgValue,
+                'total_customers' => (int)$customers,
+                'growth_rate' => (float)$growthRate,
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            number_format($row['total_revenue'] ?? 0, 2, '.', ''),
+            (int)($row['total_transactions'] ?? 0),
+            number_format($row['avg_transaction_value'] ?? 0, 2, '.', ''),
+            (int)($row['total_customers'] ?? 0),
+            number_format($row['growth_rate'] ?? 0, 2, '.', '') . '%',
+        ];
     }
 
     public function headings(): array
@@ -96,15 +113,18 @@ class AdvancedReportRevenueAnalyticsSheet extends BaseReportSheet
     {
         $revenueAnalytics = $this->data['revenue_analytics'] ?? [];
         $byPaymentMethod = $revenueAnalytics['by_payment_method'] ?? [];
-        
-        return collect($byPaymentMethod)->map(function ($method) {
-            return [
-                'Payment Method' => $method['method'] ?? '',
-                'Count' => $method['count'] ?? 0,
-                'Amount' => number_format($method['amount'] ?? 0, 2, '.', ''),
-                'Percentage' => number_format($method['percentage'] ?? 0, 2, '.', '') . '%',
-            ];
-        });
+
+        return collect($byPaymentMethod);
+    }
+
+    public function map($method): array
+    {
+        return [
+            $method['method'] ?? '',
+            (int)($method['count'] ?? 0),
+            number_format((float)($method['amount'] ?? 0), 2, '.', ''),
+            number_format((float)($method['percentage'] ?? 0), 2, '.', '') . '%',
+        ];
     }
 
     public function headings(): array
@@ -131,18 +151,21 @@ class AdvancedReportProductPerformanceSheet extends BaseReportSheet
     {
         $productAnalytics = $this->data['product_analytics'] ?? [];
         $topProducts = $productAnalytics['top_products'] ?? [];
-        
-        return collect($topProducts)->map(function ($product) {
-            return [
-                'Product Name' => $product['name'] ?? '',
-                'SKU' => $product['sku'] ?? '',
-                'Category' => $product['category_name'] ?? '',
-                'Total Sold' => $product['total_sold'] ?? 0,
-                'Total Revenue' => number_format($product['total_revenue'] ?? 0, 2, '.', ''),
-                'Total Profit' => number_format($product['total_profit'] ?? 0, 2, '.', ''),
-                'Profit Margin' => number_format($product['profit_margin'] ?? 0, 2, '.', '') . '%',
-            ];
-        });
+
+        return collect($topProducts);
+    }
+
+    public function map($product): array
+    {
+        return [
+            $product['name'] ?? '',
+            $product['sku'] ?? '',
+            $product['category_name'] ?? '',
+            (int)($product['total_sold'] ?? 0),
+            number_format((float)($product['total_revenue'] ?? 0), 2, '.', ''),
+            number_format((float)($product['total_profit'] ?? 0), 2, '.', ''),
+            number_format((float)($product['profit_margin'] ?? 0), 2, '.', '') . '%',
+        ];
     }
 
     public function headings(): array

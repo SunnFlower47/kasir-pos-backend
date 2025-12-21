@@ -54,7 +54,8 @@ class SanctumRolePermissionSeeder extends Seeder
             'audit-logs.view', 'audit-logs.delete',
 
             // Export/Import
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ];
 
         foreach ($permissions as $permission) {
@@ -89,7 +90,8 @@ class SanctumRolePermissionSeeder extends Seeder
             'outlets.view',
             'promotions.view', 'promotions.create', 'promotions.edit', 'promotions.delete',
             'audit-logs.view',
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ];
         $admin->syncPermissions($adminPermissions);
 
@@ -107,7 +109,8 @@ class SanctumRolePermissionSeeder extends Seeder
             'settings.view',
             'outlets.view',
             'promotions.view', 'promotions.create', 'promotions.edit', 'promotions.delete',
-            'export.view', 'import.create',
+            'export.view', 'export.manage',
+            'import.view', 'import.create', 'import.manage',
         ];
         $manager->syncPermissions($managerPermissions);
 

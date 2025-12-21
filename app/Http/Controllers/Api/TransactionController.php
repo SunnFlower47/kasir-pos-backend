@@ -59,13 +59,51 @@ class TransactionController extends Controller
                 $query->where('payment_method', $request->payment_method);
             }
 
-            // Filter by date range (database agnostic)
-            if ($request->has('date_from') && $request->date_from) {
-                $query->where('transaction_date', '>=', $request->date_from . ' 00:00:00');
-            }
+            // Filter transactions created after a specific datetime (for shift closing)
+            // This ensures we only count transactions after the last closing
+            // IMPORTANT: If created_after is provided, we ONLY use that filter and ignore date_from/date_to
+            // This is because we want to count transactions by their creation time, not transaction_date
+            if ($request->has('created_after') && $request->created_after) {
+                $createdAfter = $request->created_after;
 
-            if ($request->has('date_to') && $request->date_to) {
-                $query->where('transaction_date', '<=', $request->date_to . ' 23:59:59');
+                // Ensure proper datetime format (handle ISO 8601 with timezone)
+                // Laravel expects datetime in format: Y-m-d H:i:s or Y-m-d\TH:i:s.u\Z
+                try {
+                    // Try to parse and normalize the datetime
+                    $carbonDate = Carbon::parse($createdAfter);
+                    $createdAfter = $carbonDate->format('Y-m-d H:i:s');
+                } catch (\Exception $e) {
+                    // If parsing fails, use as-is
+                    Log::warning('Failed to parse created_after datetime', [
+                        'created_after' => $createdAfter,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+
+                // Log for debugging
+                if (config('app.debug')) {
+                    Log::debug('Filtering transactions after closing', [
+                        'created_after' => $createdAfter,
+                        'user_id' => $request->user_id,
+                        'outlet_id' => $request->outlet_id,
+                        'note' => 'Ignoring date_from/date_to filters when created_after is provided'
+                    ]);
+                }
+
+                // Use > (greater than) to exclude transactions created at or before closing time
+                // This ensures we only count NEW transactions after the last closing
+                // We filter by created_at (when transaction was created) not transaction_date
+                $query->where('created_at', '>', $createdAfter);
+            } else {
+                // Only apply date_from/date_to filters if created_after is NOT provided
+                // Filter by date range (database agnostic)
+                if ($request->has('date_from') && $request->date_from) {
+                    $query->where('transaction_date', '>=', $request->date_from . ' 00:00:00');
+                }
+
+                if ($request->has('date_to') && $request->date_to) {
+                    $query->where('transaction_date', '<=', $request->date_to . ' 23:59:59');
+                }
             }
 
             // Search by transaction number
@@ -83,13 +121,13 @@ class TransactionController extends Controller
         } catch (\Exception $e) {
             Log::error('Error fetching transactions', [
                 'error' => $e->getMessage(),
-                'file' => $e->getFile(),
-                'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
             ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Error loading transactions: ' . $e->getMessage()
+                'message' => app()->environment('production')
+                    ? 'Error loading transactions. Please try again later.'
+                    : 'Error loading transactions: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -107,15 +145,14 @@ class TransactionController extends Controller
         $outletId = $request->outlet_id ?? $user->outlet_id ?? 1; // Default to outlet 1 if no outlet assigned
 
         // Log transaction request details
-        Log::info('Creating new transaction:', [
-            'user_id' => $user->id,
-            'user_name' => $user->name,
-            'outlet_id' => $outletId,
-            'customer_id' => $request->customer_id,
-            'total_amount' => $request->total_amount,
-            'items_count' => count($request->items),
-            'items' => $request->items
-        ]);
+        // Log only in debug mode
+        if (config('app.debug')) {
+            Log::debug('Creating new transaction:', [
+                'user_id' => $user->id,
+                'outlet_id' => $outletId,
+                'items_count' => count($request->items),
+            ]);
+        }
 
         DB::beginTransaction();
         try {
@@ -158,33 +195,11 @@ class TransactionController extends Controller
             foreach ($request->items as $item) {
                 $product = Product::findOrFail($item['product_id']);
 
-                // Log transaction item details
-                Log::info('Processing transaction item:', [
-                    'product_id' => $item['product_id'],
-                    'product_name' => $product->name,
-                    'requested_quantity' => $item['quantity'],
-                    'outlet_id' => $outletId
-                ]);
-
-                // Check stock availability - use the determined outlet ID
+                // Check stock availability with lock to prevent race conditions
                 $productStock = ProductStock::where('product_id', $product->id)
                                           ->where('outlet_id', $outletId)
+                                          ->lockForUpdate()
                                           ->first();
-
-                // Log stock information
-                if ($productStock) {
-                    Log::info('Stock found:', [
-                        'product_id' => $product->id,
-                        'outlet_id' => $outletId,
-                        'available_stock' => $productStock->quantity,
-                        'requested_quantity' => $item['quantity']
-                    ]);
-                } else {
-                    Log::warning('No stock record found:', [
-                        'product_id' => $product->id,
-                        'outlet_id' => $outletId
-                    ]);
-                }
 
                 // Enhanced stock validation
                 if (!$productStock) {
@@ -192,13 +207,6 @@ class TransactionController extends Controller
                 }
 
                 if ($productStock->quantity < $item['quantity']) {
-                    Log::error('Insufficient stock:', [
-                        'product_name' => $product->name,
-                        'available_stock' => $productStock->quantity,
-                        'requested_quantity' => $item['quantity'],
-                        'shortage' => $item['quantity'] - $productStock->quantity
-                    ]);
-
                     throw new \Exception("Insufficient stock for product: {$product->name}. Available: {$productStock->quantity}, Requested: {$item['quantity']}");
                 }
 
@@ -211,17 +219,6 @@ class TransactionController extends Controller
                 $itemDiscount = $item['discount_amount'] ?? 0;
                 $totalPrice = ($unitPrice * $item['quantity']) - $itemDiscount;
 
-                // Log for debugging wholesale price usage
-                if (isset($item['unit_price']) && abs($item['unit_price'] - $product->selling_price) > 0.01) {
-                    Log::info('Using custom unit price (wholesale):', [
-                        'product_id' => $product->id,
-                        'product_name' => $product->name,
-                        'selling_price' => $product->selling_price,
-                        'wholesale_price' => $product->wholesale_price,
-                        'unit_price_sent' => $item['unit_price'] ?? null,
-                        'unit_price_used' => $unitPrice,
-                    ]);
-                }
 
                 // Create transaction item with snapshot of purchase price
                 TransactionItem::create([
@@ -280,11 +277,11 @@ class TransactionController extends Controller
         } catch (\Exception $e) {
             DB::rollback();
 
-            // Log transaction error
+            // Log transaction error (limit sensitive data in production)
             Log::error('Failed to create transaction', [
                 'error' => $e->getMessage(),
                 'user_id' => $user->id ?? null,
-                'request_data' => $request->all()
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
             ]);
 
             return response()->json([
@@ -319,11 +316,13 @@ class TransactionController extends Controller
             Log::error('Error fetching transaction detail', [
                 'transaction_id' => $transaction->id,
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
             ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Error loading transaction: ' . $e->getMessage()
+                'message' => app()->environment('production')
+                    ? 'Error loading transaction. Please try again later.'
+                    : 'Error loading transaction: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -454,9 +453,15 @@ class TransactionController extends Controller
 
         } catch (\Exception $e) {
             DB::rollback();
+            Log::error('Failed to refund transaction', [
+                'error' => $e->getMessage(),
+                'trace' => config('app.debug') ? $e->getTraceAsString() : null
+            ]);
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to refund transaction: ' . $e->getMessage()
+                'message' => app()->environment('production')
+                    ? 'Failed to refund transaction. Please try again later.'
+                    : 'Failed to refund transaction: ' . $e->getMessage()
             ], 500);
         }
     }

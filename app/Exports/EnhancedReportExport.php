@@ -60,16 +60,27 @@ class EnhancedReportSummarySheet extends BaseReportSheet
     public function collection()
     {
         $summary = $this->data['summary'] ?? [];
-        
+
         return collect([
             [
-                'Total Pendapatan' => number_format($summary['total_revenue'] ?? 0, 2, '.', ''),
-                'Total Transaksi' => $summary['total_transactions'] ?? 0,
-                'Rata-rata Transaksi' => number_format($summary['avg_transaction_value'] ?? 0, 2, '.', ''),
-                'Total Pelanggan' => $summary['total_customers'] ?? 0,
-                'Total Produk' => $summary['total_products'] ?? 0,
+                'total_pendapatan' => (float)($summary['total_revenue'] ?? 0),
+                'total_transaksi' => (int)($summary['total_transactions'] ?? 0),
+                'rata_transaksi' => (float)($summary['avg_transaction_value'] ?? 0),
+                'total_pelanggan' => (int)($summary['total_customers'] ?? 0),
+                'total_produk' => (int)($summary['total_products'] ?? 0),
             ]
         ]);
+    }
+
+    public function map($row): array
+    {
+        return [
+            number_format($row['total_pendapatan'] ?? 0, 2, '.', ''),
+            (int)($row['total_transaksi'] ?? 0),
+            number_format($row['rata_transaksi'] ?? 0, 2, '.', ''),
+            (int)($row['total_pelanggan'] ?? 0),
+            (int)($row['total_produk'] ?? 0),
+        ];
     }
 
     public function headings(): array
@@ -95,16 +106,19 @@ class EnhancedReportTopProductsSheet extends BaseReportSheet
     public function collection()
     {
         $topProducts = $this->data['top_products'] ?? [];
-        
-        return collect($topProducts)->map(function ($product) {
-            return [
-                'Nama Produk' => $product['name'] ?? '',
-                'SKU' => $product['sku'] ?? '',
-                'Kategori' => $product['category_name'] ?? '',
-                'Terjual' => $product['total_sold'] ?? 0,
-                'Total Pendapatan' => number_format($product['total_revenue'] ?? 0, 2, '.', ''),
-            ];
-        });
+
+        return collect($topProducts);
+    }
+
+    public function map($product): array
+    {
+        return [
+            $product['name'] ?? '',
+            $product['sku'] ?? '',
+            $product['category_name'] ?? '',
+            (int)($product['total_sold'] ?? 0),
+            number_format((float)($product['total_revenue'] ?? 0), 2, '.', ''),
+        ];
     }
 
     public function headings(): array
@@ -130,15 +144,18 @@ class EnhancedReportPaymentMethodsSheet extends BaseReportSheet
     public function collection()
     {
         $paymentMethods = $this->data['payment_methods'] ?? [];
-        
-        return collect($paymentMethods)->map(function ($method) {
-            return [
-                'Metode Pembayaran' => $method['method'] ?? '',
-                'Jumlah Transaksi' => $method['count'] ?? 0,
-                'Total Pendapatan' => number_format($method['amount'] ?? 0, 2, '.', ''),
-                'Persentase' => number_format($method['percentage'] ?? 0, 2, '.', '') . '%',
-            ];
-        });
+
+        return collect($paymentMethods);
+    }
+
+    public function map($method): array
+    {
+        return [
+            $method['method'] ?? '',
+            (int)($method['count'] ?? 0),
+            number_format((float)($method['amount'] ?? 0), 2, '.', ''),
+            number_format((float)($method['percentage'] ?? 0), 2, '.', '') . '%',
+        ];
     }
 
     public function headings(): array

@@ -56,8 +56,10 @@ class ReceiptController extends Controller
             Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
-                'error' => 'Failed to generate PDF receipt',
-                'message' => $e->getMessage()
+                'success' => false,
+                'message' => app()->environment('production')
+                    ? 'Failed to generate PDF receipt. Please try again later.'
+                    : 'Failed to generate PDF receipt: ' . $e->getMessage()
             ], 500);
         }
 
@@ -73,9 +75,11 @@ class ReceiptController extends Controller
             $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
 
             // Get company settings with fallbacks
-            $companyName = Setting::get('company_name', 'Kasir POS System');
-            $companyAddress = Setting::get('company_address', '');
-            $companyPhone = Setting::get('company_phone', '');
+            // Priority: Outlet data > Global settings > Default values
+            // Header/Footer: Always from global settings (same for all outlets)
+            $companyName = $transaction->outlet?->name ?? Setting::get('company_name', 'Kasir POS System');
+            $companyAddress = $transaction->outlet?->address ?? Setting::get('company_address', '');
+            $companyPhone = $transaction->outlet?->phone ?? Setting::get('company_phone', '');
             $receiptHeader = Setting::get('receipt_header', 'Terima kasih telah berbelanja');
             $receiptFooter = Setting::get('receipt_footer', 'Barang yang sudah dibeli tidak dapat dikembalikan');
             $currencySymbol = Setting::get('currency_symbol', 'Rp');
@@ -107,8 +111,10 @@ class ReceiptController extends Controller
             Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
-                'error' => 'Failed to generate simple PDF receipt',
-                'message' => $e->getMessage()
+                'success' => false,
+                'message' => app()->environment('production')
+                    ? 'Failed to generate PDF receipt. Please try again later.'
+                    : 'Failed to generate simple PDF receipt: ' . $e->getMessage()
             ], 500);
         }
 
@@ -124,9 +130,11 @@ class ReceiptController extends Controller
             $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
 
             // Get company settings with fallbacks
-            $companyName = Setting::get('company_name', 'Kasir POS System');
-            $companyAddress = Setting::get('company_address', '');
-            $companyPhone = Setting::get('company_phone', '');
+            // Priority: Outlet data > Global settings > Default values
+            // Header/Footer: Always from global settings (same for all outlets)
+            $companyName = $transaction->outlet?->name ?? Setting::get('company_name', 'Kasir POS System');
+            $companyAddress = $transaction->outlet?->address ?? Setting::get('company_address', '');
+            $companyPhone = $transaction->outlet?->phone ?? Setting::get('company_phone', '');
             $receiptHeader = Setting::get('receipt_header', 'Terima kasih telah berbelanja');
             $receiptFooter = Setting::get('receipt_footer', 'Barang yang sudah dibeli tidak dapat dikembalikan');
             $currencySymbol = Setting::get('currency_symbol', 'Rp');
@@ -158,8 +166,10 @@ class ReceiptController extends Controller
             Log::error('Stack trace: ' . $e->getTraceAsString());
 
             return response()->json([
-                'error' => 'Failed to generate 58mm PDF receipt',
-                'message' => $e->getMessage()
+                'success' => false,
+                'message' => app()->environment('production')
+                    ? 'Failed to generate PDF receipt. Please try again later.'
+                    : 'Failed to generate 58mm PDF receipt: ' . $e->getMessage()
             ], 500);
         }
 
@@ -174,9 +184,11 @@ class ReceiptController extends Controller
         $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
 
         // Get company settings
-        $companyName = Setting::get('company_name', 'Kasir POS System');
-        $companyAddress = Setting::get('company_address', '');
-        $companyPhone = Setting::get('company_phone', '');
+        // Priority: Outlet data > Global settings > Default values
+        // Header/Footer: Always from global settings (same for all outlets)
+        $companyName = $transaction->outlet?->name ?? Setting::get('company_name', 'Kasir POS System');
+        $companyAddress = $transaction->outlet?->address ?? Setting::get('company_address', '');
+        $companyPhone = $transaction->outlet?->phone ?? Setting::get('company_phone', '');
         $receiptHeader = Setting::get('receipt_header', 'Terima kasih telah berbelanja');
         $receiptFooter = Setting::get('receipt_footer', 'Barang yang sudah dibeli tidak dapat dikembalikan');
         $currencySymbol = Setting::get('currency_symbol', 'Rp');

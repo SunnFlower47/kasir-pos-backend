@@ -47,7 +47,7 @@ return [
     |
     */
 
-    'expiration' => null,
+    'expiration' => env('SANCTUM_TOKEN_EXPIRATION', 12 * 60), // 12 hours in minutes (default) - Balanced for POS app
 
     /*
     |--------------------------------------------------------------------------

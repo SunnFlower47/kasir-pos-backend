@@ -71,6 +71,18 @@ class SalesReportSummarySheet extends BaseReportSheet
         return collect($summary);
     }
 
+    public function map($row): array
+    {
+        return [
+            $row['Periode'] ?? '',
+            $row['Total Transaksi'] ?? 0,
+            number_format((float)($row['Total Pendapatan'] ?? 0), 2, '.', ''),
+            number_format((float)($row['Total Diskon'] ?? 0), 2, '.', ''),
+            number_format((float)($row['Total Pajak'] ?? 0), 2, '.', ''),
+            number_format((float)($row['Rata-rata Transaksi'] ?? 0), 2, '.', ''),
+        ];
+    }
+
     public function headings(): array
     {
         return ['Periode', 'Total Transaksi', 'Total Pendapatan', 'Total Diskon', 'Total Pajak', 'Rata-rata Transaksi'];

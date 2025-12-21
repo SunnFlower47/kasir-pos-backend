@@ -33,11 +33,13 @@ Route::prefix('v1')->group(function () {
         });
     }
 
-    // Public routes for direct printer access (fallback)
-    Route::get('public/transactions/{transaction}/receipt/pdf', [\App\Http\Controllers\Api\ReceiptController::class, 'generatePdf']);
-    Route::get('public/transactions/{transaction}/receipt/simple', [\App\Http\Controllers\Api\ReceiptController::class, 'generateSimplePdf']);
-    Route::get('public/transactions/{transaction}/receipt/58mm', [\App\Http\Controllers\Api\ReceiptController::class, 'generate58mmPdf']);
-    Route::get('public/transactions/{transaction}/receipt/html', [\App\Http\Controllers\Api\ReceiptController::class, 'generateHtml']);
+    // Receipt routes - Require authentication for security
+    Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+        Route::get('transactions/{transaction}/receipt/pdf', [\App\Http\Controllers\Api\ReceiptController::class, 'generatePdf']);
+        Route::get('transactions/{transaction}/receipt/simple', [\App\Http\Controllers\Api\ReceiptController::class, 'generateSimplePdf']);
+        Route::get('transactions/{transaction}/receipt/58mm', [\App\Http\Controllers\Api\ReceiptController::class, 'generate58mmPdf']);
+        Route::get('transactions/{transaction}/receipt/html', [\App\Http\Controllers\Api\ReceiptController::class, 'generateHtml']);
+    });
 
     /**
      * High frequency POS endpoints
@@ -50,7 +52,7 @@ Route::prefix('v1')->group(function () {
     });
 
     // Protected routes with general rate limiting
-    Route::middleware(['auth:sanctum', 'throttle:250,1'])->group(function () {
+    Route::middleware(['auth:sanctum', 'throttle:150,1'])->group(function () {
         // 200 requests per minute per user/IP for general API usage (increased for fast menu navigation)
         // Auth routes
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -59,7 +61,6 @@ Route::prefix('v1')->group(function () {
 
         // User management (Super Admin only)
         Route::middleware('role:Super Admin')->group(function () {
-            Route::post('/register', [AuthController::class, 'register']);
             Route::apiResource('users', \App\Http\Controllers\Api\UserController::class);
             Route::get('users/{user}/permissions', [\App\Http\Controllers\Api\UserController::class, 'getPermissions']);
             Route::get('roles', [\App\Http\Controllers\Api\UserController::class, 'getRoles']);
@@ -136,32 +137,39 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('transactions', \App\Http\Controllers\Api\TransactionController::class);
         Route::post('transactions/{transaction}/refund', [\App\Http\Controllers\Api\TransactionController::class, 'refund']);
 
-        // Receipt management - All roles can generate receipts
-        Route::get('transactions/{transaction}/receipt/pdf', [\App\Http\Controllers\Api\ReceiptController::class, 'generatePdf']);
-        Route::get('transactions/{transaction}/receipt/html', [\App\Http\Controllers\Api\ReceiptController::class, 'generateHtml']);
+        // Shift closing management - All authenticated users can access
+        Route::get('shift-closings/last', [\App\Http\Controllers\Api\ShiftClosingController::class, 'getLastClosing']);
+        Route::post('shift-closings', [\App\Http\Controllers\Api\ShiftClosingController::class, 'store']);
+        Route::get('shift-closings', [\App\Http\Controllers\Api\ShiftClosingController::class, 'index']);
 
-        // Test route for debugging PDF
-        Route::get('test/pdf/{id}', function($id) {
-            try {
-                $transaction = \App\Models\Transaction::with(['customer', 'outlet', 'user', 'transactionItems.product'])->find($id);
-                if (!$transaction) {
-                    return response()->json(['error' => 'Transaction not found'], 404);
+        // Receipt routes are now in authenticated group above (line 40-45)
+
+        // Test route for debugging PDF - ONLY IN DEVELOPMENT
+        if (app()->environment('local', 'development')) {
+            Route::get('test/pdf/{id}', function($id) {
+                try {
+                    $transaction = \App\Models\Transaction::with(['customer', 'outlet', 'user', 'transactionItems.product'])->find($id);
+                    if (!$transaction) {
+                        return response()->json(['error' => 'Transaction not found'], 404);
+                    }
+
+                    return response()->json([
+                        'success' => true,
+                        'transaction' => $transaction,
+                        'items_count' => $transaction->transactionItems->count(),
+                        'user' => $transaction->user ? $transaction->user->name : 'No user',
+                        'date' => $transaction->transaction_date
+                    ]);
+                } catch (\Exception $e) {
+                    // Don't expose stack trace in production
+                    return response()->json([
+                        'error' => app()->environment('production')
+                            ? 'An error occurred'
+                            : $e->getMessage()
+                    ], 500);
                 }
-
-                return response()->json([
-                    'success' => true,
-                    'transaction' => $transaction,
-                    'items_count' => $transaction->transactionItems->count(),
-                    'user' => $transaction->user ? $transaction->user->name : 'No user',
-                    'date' => $transaction->transaction_date
-                ]);
-            } catch (\Exception $e) {
-                return response()->json([
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString()
-                ], 500);
-            }
-        });
+            });
+        }
 
         // Customer management - All roles can read customers for POS
         Route::get('customers', [\App\Http\Controllers\Api\CustomerController::class, 'index']);
