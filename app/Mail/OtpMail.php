@@ -36,10 +36,13 @@ class OtpMail extends Mailable
     /**
      * Get the message content definition.
      */
+    public function content(): Content
+    {
         return new Content(
             view: 'emails.otp',
             with: ['otp' => $this->otp]
         );
+    }
 
     /**
      * Get the attachments for the message.
