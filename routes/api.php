@@ -24,6 +24,10 @@ Route::prefix('v2')->group(function () {
     Route::post('/login', [\App\Http\Controllers\Api\V2\AuthController::class, 'login'])
         ->middleware('throttle:10,1');
     
+    // Password Reset
+    Route::post('/auth/forgot-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'forgotPassword']);
+    Route::post('/auth/reset-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'resetPassword']);
+    
     // Public Midtrans Callback (Webhook)
     Route::post('/midtrans/callback', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'callback']);
 
