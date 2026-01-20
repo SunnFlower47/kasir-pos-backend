@@ -22,7 +22,7 @@ return [
     'allowed_origins' => [
         'https://kasir-pos.sunnflower.site',
         'https://luma-pos.sunnflower.site',
-        'https://lumapos-web.sunnflower.site/'
+        'https://lumapos-web.sunnflower.site'
         // 'http://localhost:5174', // Frontend Development
         // 'http://localhost:4173', // Alternative Frontend Port
         // 'http://localhost:4174', // Current Frontend Port

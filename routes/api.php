@@ -23,16 +23,12 @@ Route::prefix('v2')->group(function () {
     Route::post('/register', [\App\Http\Controllers\Api\V2\AuthController::class, 'register']);
     Route::post('/login', [\App\Http\Controllers\Api\V2\AuthController::class, 'login'])
         ->middleware('throttle:10,1');
-        
-    Route::post('/auth/forgot-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'forgotPassword']);
-    // Route::post('/auth/verify-reset-code', ...); // REMOVED: Link-based reset
-    Route::post('/auth/reset-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'resetPassword']);
     
     // Public Midtrans Callback (Webhook)
     Route::post('/midtrans/callback', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'callback']);
 
     // Protected Subscription Routes
-    Route::middleware(['auth:sanctum', 'tenant.suspended'])->group(function () {
+    Route::middleware('auth:sanctum')->group(function () {
         Route::get('/subscription', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'index']);
         Route::get('/subscription/history', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'history']); // New Route
         Route::post('/subscription/trial', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'activateTrial']);
@@ -52,7 +48,7 @@ Route::prefix('v2')->group(function () {
     // --- MIGRATED V2 POS ROUTES ---
     Route::get('purchases/{purchase}/print', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'print']);
 
-    Route::middleware(['auth:sanctum', 'tenant.suspended'])->group(function () {
+    Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/logout', [\App\Http\Controllers\Api\V2\AuthController::class, 'logout']);
 
         // Products
@@ -165,15 +161,6 @@ Route::prefix('v2')->group(function () {
         Route::get('system/backup/settings', [\App\Http\Controllers\SystemController::class, 'getBackupSettings']);
         Route::post('system/backup/settings', [\App\Http\Controllers\SystemController::class, 'updateBackupSettings']);
 
-        // --- SYSTEM ADMIN TOOLS (Strict Access) ---
-        Route::middleware(['role:System Admin'])->prefix('system')->group(function () {
-            Route::post('/cache/clear', [\App\Http\Controllers\SystemController::class, 'clearCache']);
-            Route::get('/logs', [\App\Http\Controllers\SystemController::class, 'getLogs']);
-            Route::get('/maintenance', [\App\Http\Controllers\SystemController::class, 'getMaintenanceMode']);
-            Route::post('/maintenance', [\App\Http\Controllers\SystemController::class, 'toggleMaintenanceMode']);
-            Route::post('/impersonate/{user}', [\App\Http\Controllers\SystemController::class, 'impersonate']);
-        });
-
         // Export/Import
         Route::get('export/{type}/excel', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'exportExcel']);
         Route::get('export/{type}/pdf', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'exportPdf']);
@@ -184,14 +171,9 @@ Route::prefix('v2')->group(function () {
         // Users & Roles
         Route::apiResource('users', \App\Http\Controllers\Api\V2\UserController::class);
         Route::get('users/{user}/permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'getPermissions']);
-        
-        // Roles Management (Full CRUD)
-        Route::apiResource('roles', \App\Http\Controllers\Api\V2\RoleController::class);
-        
+        Route::get('roles', [\App\Http\Controllers\Api\V2\UserController::class, 'getRoles']);
         Route::get('permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'getAllPermissions']);
-        Route::put('roles/{role}/permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'updateRolePermissions']); // Legacy/Alias? The RoleController update handles this now.
-        // We can keep updateRolePermissions for backward compat if frontend uses it, but the new RoleController update() method expects name+permissions.
-        // Let's keep it for now to be safe.
+        Route::put('roles/{role}/permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'updateRolePermissions']);
 
         // Audit Logs
         Route::get('audit-logs', [\App\Http\Controllers\Api\V2\AuditLogController::class, 'index']);
