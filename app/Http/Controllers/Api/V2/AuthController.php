@@ -52,7 +52,7 @@ class AuthController extends Controller
 
         // Cache::forget($key); // Handled by Service (marked confirmed)
 
-        \Illuminate\Support\Facades\Cache::forget($key);
+
 
         try {
             $result = $onboardingService->registerTenant($request->all());
