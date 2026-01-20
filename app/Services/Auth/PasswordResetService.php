@@ -46,7 +46,7 @@ class PasswordResetService
 
         // 3. Construct Link
         // Assuming Frontend runs on localhost:5173 during dev, or a configured domain in prod
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:5173'); 
+        $frontendUrl = env('WEBPROMOTION_URL', 'lumapos-web.sunnflower.site'); 
         $link = "{$frontendUrl}/reset-password?token={$token}&email=" . urlencode($email);
 
         // 4. Send Email
