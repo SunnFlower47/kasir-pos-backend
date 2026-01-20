@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Expense extends Model
 {
-    use HasFactory, Auditable;
+    use HasFactory, Auditable, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'expense_number',
         'outlet_id',
         'expense_date',

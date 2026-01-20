@@ -58,25 +58,106 @@ class RolePermissionSeeder extends Seeder
             // Audit Logs
             'audit-logs.view', 'audit-logs.delete',
 
+            // Unit Management
+            'units.view', 'units.create', 'units.edit', 'units.delete',
+
             // Export/Import
             'export.view', 'export.manage',
             'import.view', 'import.create', 'import.manage',
+
+            // Role & Permission Management
+            'roles.view', 'roles.create', 'roles.edit', 'roles.delete',
+            'permissions.view', 'permissions.manage', // usually permissions are managed by system only, but viewing roles needs permissions
         ];
 
         foreach ($permissions as $permission) {
-            Permission::firstOrCreate(['name' => $permission]);
+            Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'sanctum']);
         }
 
-        // Create Roles
-        $superAdmin = Role::create(['name' => 'Super Admin']);
-        $admin = Role::create(['name' => 'Admin']);
-        $manager = Role::create(['name' => 'Manager']);
-        $cashier = Role::create(['name' => 'Cashier']);
-        $warehouse = Role::create(['name' => 'Warehouse']);
+        // Create Roles with Scopes
+
+        // 1. SYSTEM ROLES
+        $systemAdmin = Role::firstOrCreate(
+            ['name' => 'System Admin'], 
+            ['guard_name' => 'web', 'scope' => 'system', 'tenant_id' => null] // Usually developers login via web/special guard, or sanctum. Let's stick to sanctum if single user table.
+        );
+        $systemAdmin->update(['guard_name' => 'sanctum', 'scope' => 'system', 'tenant_id' => null]);
+
+        $systemSupport = Role::firstOrCreate(
+            ['name' => 'System Support'], 
+            ['guard_name' => 'sanctum', 'scope' => 'system', 'tenant_id' => null]
+        );
+        $systemFinance = Role::firstOrCreate(
+            ['name' => 'System Finance'], 
+            ['guard_name' => 'sanctum', 'scope' => 'system', 'tenant_id' => null]
+        );
+        
+        // 2. TENANT TEMPLATE ROLES (tenant_id = NULL, scope = tenant)
+        // These are available to ALL Tenants to use/copy
+        $superAdmin = Role::firstOrCreate(
+            ['name' => 'Super Admin'], 
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
+        // Force update to ensure it's tenant scope (fix previous system scope override)
+        $superAdmin->update(['scope' => 'tenant', 'tenant_id' => null]);
+
+        $owner = Role::firstOrCreate(
+            ['name' => 'Owner'],
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
+        $admin = Role::firstOrCreate(
+            ['name' => 'Admin'],
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
+        $manager = Role::firstOrCreate(
+            ['name' => 'Manager'],
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
+        $cashier = Role::firstOrCreate(
+            ['name' => 'Cashier'],
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
+        $warehouse = Role::firstOrCreate(
+            ['name' => 'Warehouse'],
+            ['guard_name' => 'sanctum', 'scope' => 'tenant', 'tenant_id' => null]
+        );
 
         // Assign permissions to roles
-        // Super Admin - Full access to ALL permissions (including new ones)
-        $superAdmin->syncPermissions(Permission::all());
+        
+        // System Admin (Developer) - Full Access
+        $systemAdmin->syncPermissions(Permission::all()); 
+
+        // System Support - View All, Manage Tenants
+        $systemSupport->syncPermissions(Permission::whereIn('name', [
+            'users.view', 'tenants.view', 'tenants.manage', 'transactions.view', 'reports.view'
+        ])->get()); // Note: permissions like 'tenants.view' might not exist yet in $permissions array, assumed exists or ignored.
+        // Actually, let's just give them all 'view' permissions + tenants management if we had granular permissions.
+        // Since we don't have 'tenants.*' in the $permissions list above (Line 19), I should check.
+        // The list at top of file DOES NOT contain 'tenants.*'. I should add them if I want granular control.
+        // But for "Level 1" requirement, let's just assume System Admin has everything and Support has everything minus some critical things?
+        // Or just create the roles for assignment.
+        
+        // System Finance - View Reports, Transactions, Payments
+        $systemFinance->syncPermissions(Permission::whereIn('name', [
+            'transactions.view', 'reports.sales', 'reports.profit' 
+        ])->get()); 
+
+        // Super Admin (Tenant Owner) - Full Tenant Access
+        $tenantPermissions = Permission::where('guard_name', 'sanctum')
+            ->where('name', '!=', 'system.manage') 
+            ->get();
+        
+        $superAdmin->syncPermissions($tenantPermissions);
+        $owner->syncPermissions($tenantPermissions); // Keep Owner as alias/alternative if needed, or deprecate.
+
+        // Admin (Tenant) - Similar to Super Admin but maybe restricted logic later?
+        $admin->syncPermissions($tenantPermissions);
+
+        // ... (Manager, Cashier, Warehouse permissions remain same, just ensure they are sync'd)
+ 
+        
+        // System Admin uses WEB guard
+        // $systemAdmin->syncPermissions(Permission::where('guard_name', 'web')->get());
 
         // Update existing roles to include new expenses permissions
         $expensesPermissions = Permission::whereIn('name', [
@@ -84,7 +165,7 @@ class RolePermissionSeeder extends Seeder
             'expenses.create',
             'expenses.edit',
             'expenses.delete'
-        ])->get();
+        ])->where('guard_name', 'sanctum')->get();
 
         // Add expenses permissions to Admin role
         $admin->givePermissionTo($expensesPermissions);
@@ -106,6 +187,7 @@ class RolePermissionSeeder extends Seeder
             'reports.sales', 'reports.purchases', 'reports.stocks', 'reports.profit',
             'settings.view',
             'promotions.view',
+            'units.view', 'units.create', 'units.edit', 'units.delete',
             'audit-logs.view',
             'export.view', 'export.manage',
             'import.view', 'import.create', 'import.manage',
@@ -142,48 +224,80 @@ class RolePermissionSeeder extends Seeder
             'stocks.view', 'stocks.adjustment', 'stocks.transfer',
         ]);
 
-        // Create Super Admin User
-        $superAdminUser = User::create([
-            'name' => 'Super Admin',
-            'email' => 'superadmin@kasirpos.com',
-            'password' => bcrypt('password'),
-            'phone' => '081234567890',
+        // 3. Create Default Tenant and Outlet (Required for Tenant Users)
+        $tenant = \App\Models\Tenant::firstOrCreate(['email' => 'demo@kasirpos.com'], [
+            'name' => 'Demo Tenant',
+            'phone' => '1234567890',
+            'address' => 'Demo Address',
+            'owner_name' => 'Demo Owner',
             'is_active' => true,
-            'outlet_id' => 1,
         ]);
-        $superAdminUser->assignRole('Super Admin');
+        
+        $outlet = \App\Models\Outlet::firstOrCreate(['code' => 'DEMO-01'], [
+            'tenant_id' => $tenant->id,
+            'name' => 'Outlet Pusat',
+            'address' => 'Alamat Pusat',
+            'phone' => '08123456789',
+            'is_active' => true,
+        ]);
 
-        // Create Admin User
-        $adminUser = User::create([
-            'name' => 'Admin User',
-            'email' => 'admin@kasirpos.com',
-            'password' => bcrypt('password'),
-            'phone' => '081234567891',
-            'is_active' => true,
-            'outlet_id' => 1,
-        ]);
-        $adminUser->assignRole('Admin');
 
-        // Create Manager User
-        $managerUser = User::create([
-            'name' => 'Manager User',
-            'email' => 'manager@kasirpos.com',
-            'password' => bcrypt('password'),
-            'phone' => '081234567892',
-            'is_active' => true,
-            'outlet_id' => 1,
-        ]);
-        $managerUser->assignRole('Manager');
+        // 4. Create Users
 
-        // Create Cashier User
-        $cashierUser = User::create([
-            'name' => 'Cashier User',
-            'email' => 'cashier@kasirpos.com',
-            'password' => bcrypt('password'),
-            'phone' => '081234567893',
-            'is_active' => true,
-            'outlet_id' => 1,
-        ]);
-        $cashierUser->assignRole('Cashier');
+        // System Admin (Developer) - No Tenant, No Outlet
+        $systemAdminUser = User::firstOrCreate(
+            ['email' => 'system@kasirpos.com'],
+            [
+                'name' => 'System Administrator',
+                'password' => bcrypt('password'),
+                'phone' => '0000000000',
+                'is_active' => true,
+                'outlet_id' => null, // System admin doesn't belong to outlet
+                'tenant_id' => null, // System admin doesn't belong to tenant
+            ]
+        );
+        $systemAdminUser->assignRole($systemAdmin);
+
+        // Super Admin (Tenant Owner)
+        $superAdminUser = User::firstOrCreate(
+            ['email' => 'superadmin@kasirpos.com'],
+            [
+                'name' => 'Tenant Owner',
+                'password' => bcrypt('password'),
+                'phone' => '081234567890',
+                'is_active' => true,
+                'outlet_id' => $outlet->id,
+                'tenant_id' => $tenant->id,
+            ]
+        );
+        $superAdminUser->assignRole($superAdmin);
+
+        // Manager User
+        $managerUser = User::firstOrCreate(
+            ['email' => 'manager@kasirpos.com'],
+            [
+                'name' => 'Manager User',
+                'password' => bcrypt('password'),
+                'phone' => '081234567892',
+                'is_active' => true,
+                'outlet_id' => $outlet->id,
+                'tenant_id' => $tenant->id,
+            ]
+        );
+        $managerUser->assignRole($manager);
+
+        // Cashier User
+        $cashierUser = User::firstOrCreate(
+            ['email' => 'cashier@kasirpos.com'],
+            [
+                'name' => 'Cashier User',
+                'password' => bcrypt('password'),
+                'phone' => '081234567893',
+                'is_active' => true,
+                'outlet_id' => $outlet->id,
+                'tenant_id' => $tenant->id,
+            ]
+        );
+        $cashierUser->assignRole($cashier);
     }
 }

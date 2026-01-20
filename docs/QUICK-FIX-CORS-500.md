@@ -34,7 +34,7 @@ class HandleCors
 
         // Allowed origins for web clients
         $allowedOrigins = [
-            'https://kasir-pos.sunnflower.site',
+            'https://kasir-pos.sunnflower.site/',
         ];
 
         // Add development origins only in non-production
@@ -95,7 +95,7 @@ sudo systemctl restart php-fpm
 
 ```bash
 curl -X OPTIONS \
-  -H "Origin: https://kasir-pos.sunnflower.site" \
+  -H "Origin: https://kasir-pos.sunnflower.site/" \
   -H "Access-Control-Request-Method: GET" \
   -i \
   https://kasir-pos-api.sunnflower.site/api/v1/dashboard

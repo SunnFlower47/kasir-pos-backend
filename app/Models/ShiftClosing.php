@@ -8,9 +8,10 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class ShiftClosing extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'outlet_id',
         'user_id',
         'cashier_name',

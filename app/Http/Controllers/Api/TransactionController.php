@@ -30,8 +30,9 @@ class TransactionController extends Controller
                 'customer:id,name,email,phone',
                 'outlet:id,name',
                 'user:id,name,email',
-                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price',
-                'transactionItems.product:id,name,sku'
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,unit_id,conversion_factor',
+                'transactionItems.product:id,name,sku',
+                'transactionItems.unit:id,name,symbol'
             ]);
 
             // Filter by outlet
@@ -172,6 +173,13 @@ class TransactionController extends Controller
                 $transactionDate = now();
             }
 
+            $status = $request->status && in_array($request->status, ['pending', 'completed']) 
+                ? $request->status 
+                : 'completed';
+            
+            // For pending transactions (tempo), paid_amount can be 0 or partial
+            // For completed transactions, paid_amount usually must be >= total (handled by frontend, backend flexible)
+            
             $transaction = Transaction::create([
                 'transaction_number' => Transaction::generateTransactionNumber(),
                 'outlet_id' => $outletId,
@@ -182,10 +190,10 @@ class TransactionController extends Controller
                 'discount_amount' => $request->discount_amount ?? 0,
                 'tax_amount' => $request->tax_amount ?? 0,
                 'total_amount' => 0,
-                'paid_amount' => $request->paid_amount,
+                'paid_amount' => $request->paid_amount ?? 0,
                 'change_amount' => 0,
                 'payment_method' => $request->payment_method,
-                'status' => 'completed',
+                'status' => $status,
                 'notes' => $request->notes,
             ]);
 
@@ -220,20 +228,50 @@ class TransactionController extends Controller
                 $totalPrice = ($unitPrice * $item['quantity']) - $itemDiscount;
 
 
+                $unitId = $item['unit_id'] ?? $product->unit_id;
+                
+                // Robustly determine conversion factor from Database
+                $conversionFactor = 1;
+                $productUnit = null;
+                
+                if ($unitId != $product->unit_id) {
+                    $productUnit = \App\Models\ProductUnit::where('product_id', $product->id)
+                        ->where('unit_id', $unitId)
+                        ->first();
+                    
+                    if ($productUnit) {
+                        $conversionFactor = $productUnit->conversion_factor;
+                    }
+                }
+
+                // Determine Purchase Price (Modal)
+                // 1. Default to effective base purchase price (Base Price * Conversion)
+                $itemPurchasePrice = $product->purchase_price * $conversionFactor;
+                
+                // 2. Override if custom Unit Purchase Price is set
+                if ($productUnit && $productUnit->purchase_price > 0) {
+                    $itemPurchasePrice = $productUnit->purchase_price;
+                }
+
                 // Create transaction item with snapshot of purchase price
                 TransactionItem::create([
                     'transaction_id' => $transaction->id,
                     'product_id' => $product->id,
                     'quantity' => $item['quantity'],
+                    'unit_id' => $unitId,
+                    'conversion_factor' => $conversionFactor,
                     'unit_price' => $unitPrice,
-                    'purchase_price' => $product->purchase_price, // Store snapshot of purchase price at transaction time
+                    'purchase_price' => $itemPurchasePrice, // Store CORRECT unit purchase price
                     'discount_amount' => $itemDiscount,
                     'total_price' => $totalPrice,
                 ]);
 
+                // Calculate total quantity to deduct based on conversion factor
+                $deductedQuantity = $item['quantity'] * $conversionFactor;
+
                 // Reduce stock
                 $productStock->reduceStock(
-                    $item['quantity'],
+                    $deductedQuantity,
                     'out',
                     Transaction::class,
                     $transaction->id,
@@ -302,10 +340,12 @@ class TransactionController extends Controller
                 'customer:id,name,email,phone',
                 'outlet:id,name',
                 'user:id,name,email',
-                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price',
-                'transactionItems.product:id,name,sku,selling_price,purchase_price',
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,unit_id,conversion_factor',
+                'transactionItems.unit:id,name',
+                'transactionItems.product:id,name,sku,selling_price,purchase_price,unit_id',
                 'transactionItems.product.category:id,name',
-                'transactionItems.product.unit:id,name'
+                'transactionItems.product.unit:id,name',
+                'transactionItems.unit:id,name,symbol'
             ]);
 
             return response()->json([
@@ -462,6 +502,56 @@ class TransactionController extends Controller
                 'message' => app()->environment('production')
                     ? 'Failed to refund transaction. Please try again later.'
                     : 'Failed to refund transaction: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    /**
+     * Settle a pending transaction (Tempo).
+     */
+    public function settle(Request $request, Transaction $transaction): JsonResponse
+    {
+        if ($transaction->status !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Hanya transaksi pending yang dapat dilunasi'
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            // Validate paid amount
+            $paidAmount = $request->paid_amount;
+            if ($paidAmount < $transaction->total_amount) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Jumlah pembayaran kurang dari total tagihan'
+                ], 422);
+            }
+
+            $change = $paidAmount - $transaction->total_amount;
+
+            $transaction->update([
+                'status' => 'completed',
+                'paid_amount' => $paidAmount,
+                'change_amount' => $change,
+                'payment_method' => $request->payment_method ?? 'cash',
+                'transaction_date' => now(), // Update date to now for reporting
+            ]);
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Transaksi berhasil dilunasi',
+                'data' => $transaction->fresh(['customer', 'transactionItems.product', 'user', 'outlet'])
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollback();
+            return response()->json([
+                'success' => false,
+                'message' => 'Gagal melunasi transaksi: ' . $e->getMessage()
             ], 500);
         }
     }

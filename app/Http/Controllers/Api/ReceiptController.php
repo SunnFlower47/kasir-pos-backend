@@ -19,7 +19,7 @@ class ReceiptController extends Controller
     public function generatePdf(Transaction $transaction)
     {
         try {
-            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
+            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit', 'transactionItems.unit']);
 
             // Get company settings with fallbacks
             $companyName = Setting::get('company_name', 'Kasir POS System');
@@ -72,7 +72,7 @@ class ReceiptController extends Controller
     public function generateSimplePdf(Transaction $transaction)
     {
         try {
-            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
+            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit', 'transactionItems.unit']);
 
             // Get company settings with fallbacks
             // Priority: Outlet data > Global settings > Default values
@@ -127,7 +127,7 @@ class ReceiptController extends Controller
     public function generate58mmPdf(Transaction $transaction)
     {
         try {
-            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
+            $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit', 'transactionItems.unit']);
 
             // Get company settings with fallbacks
             // Priority: Outlet data > Global settings > Default values
@@ -181,7 +181,7 @@ class ReceiptController extends Controller
      */
     public function generateHtml(Transaction $transaction): JsonResponse
     {
-        $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit']);
+        $transaction->load(['customer', 'outlet', 'user', 'transactionItems.product.category', 'transactionItems.product.unit', 'transactionItems.unit']);
 
         // Get company settings
         // Priority: Outlet data > Global settings > Default values

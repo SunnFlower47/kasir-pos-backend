@@ -6,7 +6,7 @@
 
 ```bash
 curl -v -X OPTIONS \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: POST" \
      -H "Access-Control-Request-Headers: Content-Type,Authorization" \
      https://kasir-pos-api.sunnflower.site/api/v1/login
@@ -15,7 +15,7 @@ curl -v -X OPTIONS \
 **Response yang diharapkan:**
 ```
 HTTP/1.1 200 OK
-Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site
+Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/
 Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Client-Type, X-Client-Version, Accept, Origin
 Access-Control-Allow-Credentials: true
@@ -29,7 +29,7 @@ Jika server backend ada di server yang sama, test langsung:
 ```bash
 # Ganti dengan IP atau hostname server kamu
 curl -v -X OPTIONS \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: POST" \
      -H "Access-Control-Request-Headers: Content-Type,Authorization" \
      http://localhost/api/v1/login
@@ -39,7 +39,7 @@ Atau jika backend di port lain:
 
 ```bash
 curl -v -X OPTIONS \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: POST" \
      http://127.0.0.1:8000/api/v1/login
 ```
@@ -48,7 +48,7 @@ curl -v -X OPTIONS \
 
 ```bash
 curl -v -X POST \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Content-Type: application/json" \
      -d '{"email":"test@example.com","password":"password"}' \
      https://kasir-pos-api.sunnflower.site/api/v1/login
@@ -56,7 +56,7 @@ curl -v -X POST \
 
 **Response harus mengandung:**
 ```
-Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site
+Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/
 Access-Control-Allow-Credentials: true
 ```
 
@@ -114,7 +114,7 @@ php artisan tinker
 Di dalam tinker:
 ```php
 $request = Request::create('/api/v1/login', 'OPTIONS', [], [], [], [
-    'HTTP_Origin' => 'https://kasir-pos.sunnflower.site',
+    'HTTP_Origin' => 'https://kasir-pos.sunnflower.site/',
 ]);
 $response = app()->handle($request);
 $response->headers->all(); // Lihat semua headers

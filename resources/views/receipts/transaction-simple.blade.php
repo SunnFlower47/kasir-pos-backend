@@ -84,7 +84,7 @@
         <div class="item">
             <div>{{ $item->product->name ?? 'Produk' }}</div>
             <div class="row">
-                <span>{{ $item->quantity }} x {{ $currency_symbol }}{{ number_format((float)$item->unit_price, 0, ',', '.') }}</span>
+                <span>{{ $item->quantity }} {{ $item->unit->symbol ?? $item->unit->name ?? $item->product->unit->name ?? '' }} x {{ $currency_symbol }}{{ number_format((float)$item->unit_price, 0, ',', '.') }}</span>
                 <span>{{ $currency_symbol }}{{ number_format((float)$item->total_price, 0, ',', '.') }}</span>
             </div>
         </div>

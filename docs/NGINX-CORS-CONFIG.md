@@ -79,7 +79,7 @@ location /api/ {
 
 1. **Cek apakah Nginx menimpa headers:**
    ```bash
-   curl -I -H "Origin: https://kasir-pos.sunnflower.site" \
+   curl -I -H "Origin: https://kasir-pos.sunnflower.site/" \
         -X OPTIONS \
         https://kasir-pos-api.sunnflower.site/api/v1/profile
    ```

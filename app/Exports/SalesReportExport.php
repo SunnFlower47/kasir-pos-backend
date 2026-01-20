@@ -37,7 +37,7 @@ class SalesReportExport implements WithMultipleSheets
     }
 }
 
-class SalesReportSummarySheet extends BaseReportSheet
+class SalesReportSummarySheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     public function collection()
     {
@@ -57,14 +57,19 @@ class SalesReportSummarySheet extends BaseReportSheet
             $query->where('outlet_id', $this->params['outlet_id']);
         }
 
+        if (isset($this->params['tenant_id'])) {
+            $query->where('tenant_id', $this->params['tenant_id']);
+        }
+
         $summary = [
             [
+
                 'Periode' => $dateFrom . ' s/d ' . $dateTo,
                 'Total Transaksi' => $query->count(),
-                'Total Pendapatan' => $query->sum('total_amount'),
-                'Total Diskon' => $query->sum('discount_amount'),
-                'Total Pajak' => $query->sum('tax_amount'),
-                'Rata-rata Transaksi' => $query->avg('total_amount'),
+                'Total Pendapatan' => (float)$query->sum('total_amount'),
+                'Total Diskon' => (float)$query->sum('discount_amount'),
+                'Total Pajak' => (float)$query->sum('tax_amount'),
+                'Rata-rata Transaksi' => (float)$query->avg('total_amount'),
             ]
         ];
 
@@ -76,10 +81,10 @@ class SalesReportSummarySheet extends BaseReportSheet
         return [
             $row['Periode'] ?? '',
             $row['Total Transaksi'] ?? 0,
-            number_format((float)($row['Total Pendapatan'] ?? 0), 2, '.', ''),
-            number_format((float)($row['Total Diskon'] ?? 0), 2, '.', ''),
-            number_format((float)($row['Total Pajak'] ?? 0), 2, '.', ''),
-            number_format((float)($row['Rata-rata Transaksi'] ?? 0), 2, '.', ''),
+            $row['Total Pendapatan'] ?? 0,
+            $row['Total Diskon'] ?? 0,
+            $row['Total Pajak'] ?? 0,
+            $row['Rata-rata Transaksi'] ?? 0,
         ];
     }
 
@@ -88,13 +93,36 @@ class SalesReportSummarySheet extends BaseReportSheet
         return ['Periode', 'Total Transaksi', 'Total Pendapatan', 'Total Diskon', 'Total Pajak', 'Rata-rata Transaksi'];
     }
 
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true, 'size' => 12],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'C' => '#,##0.00', // Total Pendapatan
+            'D' => '#,##0.00', // Total Diskon
+            'E' => '#,##0.00', // Total Pajak
+            'F' => '#,##0.00', // Rata-rata Transaksi
+        ];
+    }
+
     public function title(): string
     {
         return 'Ringkasan';
     }
 }
 
-class SalesReportTransactionsSheet extends BaseReportSheet
+class SalesReportTransactionsSheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     public function collection()
     {
@@ -115,6 +143,10 @@ class SalesReportTransactionsSheet extends BaseReportSheet
             $query->where('outlet_id', $this->params['outlet_id']);
         }
 
+        if (isset($this->params['tenant_id'])) {
+            $query->where('tenant_id', $this->params['tenant_id']);
+        }
+
         return $query->orderBy('transaction_date', 'desc')->get();
     }
 
@@ -122,14 +154,14 @@ class SalesReportTransactionsSheet extends BaseReportSheet
     {
         return [
             $transaction->transaction_number,
-            $transaction->transaction_date ? date('d/m/Y H:i', strtotime($transaction->transaction_date)) : '',
+            $transaction->transaction_date ? date('Y-m-d H:i', strtotime($transaction->transaction_date)) : '',
             $transaction->outlet->name ?? '',
             $transaction->user->name ?? '',
             $transaction->customer->name ?? '-',
-            number_format($transaction->subtotal, 2, '.', ''),
-            number_format($transaction->discount_amount, 2, '.', ''),
-            number_format($transaction->tax_amount, 2, '.', ''),
-            number_format($transaction->total_amount, 2, '.', ''),
+            (float)$transaction->subtotal,
+            (float)$transaction->discount_amount,
+            (float)$transaction->tax_amount,
+            (float)$transaction->total_amount,
             $transaction->payment_method ?? '',
         ];
     }
@@ -150,13 +182,36 @@ class SalesReportTransactionsSheet extends BaseReportSheet
         ];
     }
 
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'F' => '#,##0.00', // Subtotal
+            'G' => '#,##0.00', // Diskon
+            'H' => '#,##0.00', // Pajak
+            'I' => '#,##0.00', // Total
+        ];
+    }
+
     public function title(): string
     {
         return 'Transaksi';
     }
 }
 
-class SalesReportTopProductsSheet extends BaseReportSheet
+class SalesReportTopProductsSheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     public function collection()
     {
@@ -187,6 +242,10 @@ class SalesReportTopProductsSheet extends BaseReportSheet
             $query->where('transactions.outlet_id', $this->params['outlet_id']);
         }
 
+        if (isset($this->params['tenant_id'])) {
+            $query->where('transactions.tenant_id', $this->params['tenant_id']);
+        }
+
         return $query->groupBy('products.id', 'products.name', 'products.sku', 'categories.name')
             ->orderBy('total_sold', 'desc')
             ->limit(50)
@@ -200,13 +259,33 @@ class SalesReportTopProductsSheet extends BaseReportSheet
             $product->name ?? '',
             $product->category_name ?? '',
             $product->total_sold ?? 0,
-            number_format($product->total_revenue ?? 0, 2, '.', ''),
+            (float)($product->total_revenue ?? 0),
         ];
     }
 
     public function headings(): array
     {
         return ['SKU', 'Nama Produk', 'Kategori', 'Terjual', 'Total Pendapatan'];
+    }
+
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'E' => '#,##0.00', // Total Pendapatan
+        ];
     }
 
     public function title(): string

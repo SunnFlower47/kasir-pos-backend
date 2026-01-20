@@ -99,7 +99,7 @@ php artisan route:cache
 ```bash
 # Test OPTIONS request
 curl -X OPTIONS \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: GET" \
      -H "Access-Control-Request-Headers: authorization,x-client-type,x-client-version" \
      https://kasir-pos-api.sunnflower.site/api/v1/dashboard \
@@ -108,7 +108,7 @@ curl -X OPTIONS \
 
 Response harus:
 - Status: `200 OK` atau `204 No Content`
-- Header: `Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site`
+- Header: `Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/`
 - **TIDAK boleh** `500 Internal Server Error`
 
 ### Step 6: Restart Web Server

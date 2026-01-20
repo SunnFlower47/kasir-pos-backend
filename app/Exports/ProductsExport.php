@@ -30,11 +30,30 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
     public function collection()
     {
         if ($this->isTemplate) {
-            // Return empty collection for template
-            return collect([]);
+            // Return sample data for template
+            return collect([
+                [
+                    'name' => 'Contoh Produk',
+                    'sku' => 'PROD001',
+                    'barcode' => '123456789',
+                    'category' => 'Makanan', // Just example string, assuming import handles name lookup or requires ID
+                    'unit' => 'Pcs',
+                    'purchase_price' => 10000,
+                    'selling_price' => 15000,
+                    'wholesale_price' => 14000,
+                    'min_stock' => 10,
+                    'description' => 'Contoh deskripsi produk',
+                    'is_active' => 'Aktif',
+                ]
+            ]);
         }
 
         $query = Product::with(['category', 'unit']);
+
+        // Filter by tenant
+        if (isset($this->params['tenant_id'])) {
+            $query->where('tenant_id', $this->params['tenant_id']);
+        }
 
         // Apply filters from params
         if (isset($this->params['outlet_id'])) {
@@ -88,18 +107,49 @@ class ProductsExport implements FromCollection, WithHeadings, WithMapping, WithS
      */
     public function map($product): array
     {
+        // Use data_get for robust access to both Array and Object properties
+        $name = data_get($product, 'name', '');
+        $sku = data_get($product, 'sku', '');
+        $barcode = data_get($product, 'barcode', '');
+        
+        // Handle relationships safely
+        $category = '';
+        if (is_object($product) && isset($product->category)) {
+             $category = $product->category->name ?? '';
+        } else {
+             $category = data_get($product, 'category', ''); 
+        }
+
+        $unit = '';
+        if (is_object($product) && isset($product->unit)) {
+             $unit = $product->unit->name ?? '';
+        } else {
+             $unit = data_get($product, 'unit', '');
+        }
+        
+        $purchasePrice = data_get($product, 'purchase_price', 0);
+        $sellingPrice = data_get($product, 'selling_price', 0);
+        $wholesalePrice = data_get($product, 'wholesale_price', 0);
+        $minStock = data_get($product, 'min_stock', 0);
+        $description = data_get($product, 'description', '');
+        
+        $isActive = data_get($product, 'is_active');
+        // If boolean (Model), convert. If string (Template), keep/default.
+        $status = ($isActive === true || $isActive === 1) ? 'Aktif' : 
+                 (($isActive === false || $isActive === 0) ? 'Tidak Aktif' : ($isActive ?: 'Aktif'));
+
         return [
-            $product->name ?? '',
-            $product->sku ?? '',
-            $product->barcode ?? '',
-            $product->category->name ?? '',
-            $product->unit->name ?? '',
-            number_format($product->purchase_price ?? 0, 2, '.', ''),
-            number_format($product->selling_price ?? 0, 2, '.', ''),
-            number_format($product->wholesale_price ?? 0, 2, '.', ''),
-            $product->min_stock ?? 0,
-            $product->description ?? '',
-            $product->is_active ? 'Aktif' : 'Tidak Aktif',
+            $name,
+            $sku,
+            $barcode,
+            $category,
+            $unit,
+            number_format((float)$purchasePrice, 2, '.', ''),
+            number_format((float)$sellingPrice, 2, '.', ''),
+            number_format((float)$wholesalePrice, 2, '.', ''),
+            $minStock,
+            $description,
+            $status,
         ];
     }
 

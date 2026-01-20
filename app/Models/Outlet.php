@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Outlet extends Model
 {
-    use HasFactory, Auditable;
+    use HasFactory, Auditable, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'name',
         'code',
         'address',

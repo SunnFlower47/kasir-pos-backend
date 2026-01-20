@@ -14,6 +14,8 @@ class TransactionItem extends Model
         'transaction_id',
         'product_id',
         'quantity',
+        'unit_id',
+        'conversion_factor',
         'unit_price',
         'purchase_price',
         'discount_amount',
@@ -30,6 +32,8 @@ class TransactionItem extends Model
             'quantity' => 'decimal:3',
             'transaction_id' => 'integer',
             'product_id' => 'integer',
+            'unit_id' => 'integer',
+            'conversion_factor' => 'decimal:2',
         ];
     }
 
@@ -47,6 +51,14 @@ class TransactionItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /**
+     * Get the unit associated with the transaction item.
+     */
+    public function unit(): BelongsTo
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     /**

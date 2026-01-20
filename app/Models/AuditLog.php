@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Auth;
 class AuditLog extends Model
 {
     use HasFactory;
+    use \App\Traits\TenantScoped;
 
     protected $fillable = [
         'model_type',
@@ -21,6 +22,7 @@ class AuditLog extends Model
         'user_id',
         'ip_address',
         'user_agent',
+        'tenant_id',
     ];
 
     protected function casts(): array
@@ -61,6 +63,12 @@ class AuditLog extends Model
             'user_id' => Auth::id(),
             'ip_address' => request()->ip(),
             'user_agent' => request()->userAgent(),
+            // Ensure tenant_id is captured if we are acting on a Tenant scope or if user has one
+            // For System Admins impacting a Tenant, we ideally valid logging visible to that Tenant?
+            // Or just System Log? The user said "Audit Logs", likely system wide.
+            // If TenantScoped trait is active, it might force Auth::user()->tenant_id.
+            // We'll let the Trait handle it, but if System Admin (tenant_id null), 
+            // the log might end up with null tenant_id, which is correct for System Logs.
         ]);
     }
 }

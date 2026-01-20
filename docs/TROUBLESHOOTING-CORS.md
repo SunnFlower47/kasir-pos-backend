@@ -17,7 +17,7 @@ $middleware->prepend(\App\Http\Middleware\HandleCors::class);
 **Cek di `app/Http/Middleware/HandleCors.php`:**
 ```php
 $allowedWebOrigins = [
-    'https://kasir-pos.sunnflower.site', // Pastikan origin production ada di sini
+    'https://kasir-pos.sunnflower.site/', // Pastikan origin production ada di sini
 ];
 ```
 
@@ -71,7 +71,7 @@ server {
 ```bash
 # Test OPTIONS (preflight) request
 curl -X OPTIONS \
-  -H "Origin: https://kasir-pos.sunnflower.site" \
+  -H "Origin: https://kasir-pos.sunnflower.site/" \
   -H "Access-Control-Request-Method: GET" \
   -H "Access-Control-Request-Headers: Authorization,Content-Type" \
   -v \
@@ -81,7 +81,7 @@ curl -X OPTIONS \
 **Expected Response Headers:**
 ```
 HTTP/1.1 200 OK
-Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site
+Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/
 Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Client-Type, X-Client-Version, Accept, Origin
 Access-Control-Allow-Credentials: true
@@ -93,7 +93,7 @@ Access-Control-Max-Age: 86400
 ```bash
 # Test actual GET request
 curl -X GET \
-  -H "Origin: https://kasir-pos.sunnflower.site" \
+  -H "Origin: https://kasir-pos.sunnflower.site/" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -v \
   https://kasir-pos-api.sunnflower.site/api/v1/dashboard
@@ -102,7 +102,7 @@ curl -X GET \
 **Expected Response Headers:**
 ```
 HTTP/1.1 200 OK
-Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site
+Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/
 Access-Control-Allow-Credentials: true
 Access-Control-Expose-Headers: Content-Disposition
 ```
@@ -128,7 +128,7 @@ Access-Control-Expose-Headers: Content-Disposition
 4. **Test dengan curl:**
    ```bash
    # Simulate preflight
-   curl -X OPTIONS -H "Origin: https://kasir-pos.sunnflower.site" \
+   curl -X OPTIONS -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: GET" \
      -v https://kasir-pos-api.sunnflower.site/api/v1/dashboard 2>&1 | grep -i "access-control"
    ```
@@ -176,7 +176,7 @@ Jika sangat urgent dan perlu fix cepat, tambahkan CORS headers di web server:
 ```nginx
 location /api {
     if ($request_method = 'OPTIONS') {
-        add_header 'Access-Control-Allow-Origin' 'https://kasir-pos.sunnflower.site';
+        add_header 'Access-Control-Allow-Origin' 'https://kasir-pos.sunnflower.site/';
         add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
         add_header 'Access-Control-Allow-Headers' 'Authorization, Content-Type, X-Requested-With, X-Client-Type';
         add_header 'Access-Control-Allow-Credentials' 'true';

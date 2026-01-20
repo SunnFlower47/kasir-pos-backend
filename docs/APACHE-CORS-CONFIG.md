@@ -39,7 +39,7 @@ Jika memang harus set CORS di Apache (misalnya untuk static files), gunakan:
 
 1. **Cek apakah Apache menimpa headers:**
    ```bash
-   curl -I -H "Origin: https://kasir-pos.sunnflower.site" \
+   curl -I -H "Origin: https://kasir-pos.sunnflower.site/" \
         -X OPTIONS \
         https://kasir-pos-api.sunnflower.site/api/v1/profile
    ```

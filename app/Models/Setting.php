@@ -7,9 +7,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class Setting extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'key',
         'value',
         'type',

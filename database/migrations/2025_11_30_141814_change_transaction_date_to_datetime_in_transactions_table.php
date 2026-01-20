@@ -31,6 +31,10 @@ return new class extends Migration
 
             // Drop old column
             Schema::table('transactions', function (Blueprint $table) {
+                // Drop indexes that use this column first to prevent SQLite errors
+                $table->dropIndex(['transaction_date']); 
+                $table->dropIndex(['outlet_id', 'transaction_date']);
+                
                 $table->dropColumn('transaction_date');
             });
 

@@ -29,6 +29,13 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
     protected $validRows = [];
     protected $invalidRows = [];
 
+    public function __construct($user = null)
+    {
+        $this->user = $user;
+    }
+
+    protected $user;
+
     public function setPreviewMode(bool $previewMode): void
     {
         $this->previewMode = $previewMode;
@@ -44,6 +51,10 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
         $this->rowCount++;
 
         try {
+            // Get tenant info
+            $tenantId = $this->user ? $this->user->tenant_id : null;
+            $businessId = $this->user ? $this->user->business_id : null;
+
             // Normalize column names (handle Indonesian column names)
             $name = $this->getValue($row, ['nama_produk', 'name', 'nama', 'product_name']);
             $sku = $this->getValue($row, ['sku', 'SKU']);
@@ -78,16 +89,30 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
                 throw new \Exception("Row {$this->rowCount}: Harga jual harus berupa angka");
             }
 
-            // Get or create category
+            // Get or create category (with tenant scope)
+            $categoryWhere = ['name' => trim($categoryName)];
+            if ($tenantId) $categoryWhere['tenant_id'] = $tenantId;
+
             $category = Category::firstOrCreate(
-                ['name' => trim($categoryName)],
-                ['is_active' => true, 'description' => 'Imported from Excel']
+                $categoryWhere,
+                [
+                    'is_active' => true, 
+                    'description' => 'Imported from Excel',
+                    'business_id' => $businessId
+                ]
             );
 
-            // Get or create unit
+            // Get or create unit (with tenant scope)
+            $unitWhere = ['name' => trim($unitName)];
+            if ($tenantId) $unitWhere['tenant_id'] = $tenantId;
+
             $unit = Unit::firstOrCreate(
-                ['name' => trim($unitName)],
-                ['symbol' => Str::upper(substr(trim($unitName), 0, 3)), 'description' => 'Imported from Excel']
+                $unitWhere,
+                [
+                    'symbol' => Str::upper(substr(trim($unitName), 0, 3)), 
+                    'description' => 'Imported from Excel',
+                    'business_id' => $businessId
+                ]
             );
 
             // Generate SKU if not provided
@@ -95,14 +120,24 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
                 $sku = 'PRD' . str_pad(Product::count() + 1, 6, '0', STR_PAD_LEFT);
             }
 
-            // Check for duplicate SKU
-            if (Product::where('sku', $sku)->exists()) {
+            // Check for duplicate SKU (scoped by tenant if applicable, but usually simple check here)
+            // Ideally we check per tenant, but Product::where doesn't auto-scope unless global scope.
+            // Let's assume global scope handles reading, but for explicit check we add tenant_id manually if safe.
+            $skuCheck = Product::where('sku', $sku);
+            if ($tenantId) $skuCheck->where('tenant_id', $tenantId);
+            
+            if ($skuCheck->exists()) {
                 throw new \Exception("Row {$this->rowCount}: SKU '{$sku}' sudah ada");
             }
 
             // Check for duplicate barcode if provided
-            if (!empty($barcode) && Product::where('barcode', $barcode)->exists()) {
-                throw new \Exception("Row {$this->rowCount}: Barcode '{$barcode}' sudah ada");
+            if (!empty($barcode)) {
+                $barcodeCheck = Product::where('barcode', $barcode);
+                if ($tenantId) $barcodeCheck->where('tenant_id', $tenantId);
+
+                if ($barcodeCheck->exists()) {
+                    throw new \Exception("Row {$this->rowCount}: Barcode '{$barcode}' sudah ada");
+                }
             }
 
             // Parse active status
@@ -125,6 +160,8 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
                 'min_stock' => !empty($minStock) && is_numeric($minStock) ? (float) $minStock : 0,
                 'description' => !empty($description) ? trim($description) : null,
                 'is_active' => $isActiveValue,
+                'tenant_id' => $tenantId,
+                'business_id' => $businessId,
             ];
 
             if ($this->previewMode) {

@@ -33,6 +33,7 @@ class StoreTransactionRequest extends FormRequest
             'tax_amount' => 'nullable|numeric|min:0',
             'paid_amount' => 'required|numeric|min:0',
             'payment_method' => 'required|in:cash,transfer,qris,e_wallet',
+            'status' => 'nullable|in:completed,pending',
             'notes' => 'nullable|string',
 
             // Transaction items
@@ -75,6 +76,11 @@ class StoreTransactionRequest extends FormRequest
     {
         $validator->after(function ($validator) {
             // Validate that paid amount is sufficient
+            // SKIP validation if status is 'pending' (Tempo) or 'cancelled' or 'refunded'
+            if ($this->has('status') && $this->status === 'pending') {
+                return;
+            }
+
             $subtotal = 0;
             $totalDiscount = $this->discount_amount ?? 0;
             $totalTax = $this->tax_amount ?? 0;
@@ -101,8 +107,10 @@ class StoreTransactionRequest extends FormRequest
             $totalAmount = $subtotal + $totalTax - $totalDiscount;
             $paidAmount = $this->paid_amount ?? 0;
 
-            if ($paidAmount < $totalAmount) {
-                $validator->errors()->add('paid_amount', 'Paid amount is insufficient');
+            // Strict check: paid amount must be >= total amount for completed transactions
+            // Use a small epsilon for float comparison to avoid precision issues
+            if ($paidAmount < ($totalAmount - 0.01)) {
+                $validator->errors()->add('paid_amount', 'Paid amount is insufficient for completed transaction. Total: ' . $totalAmount . ', Paid: ' . $paidAmount);
             }
         });
     }

@@ -140,14 +140,14 @@ Pastikan rewrite rules sudah benar.
 1. **Check `config/cors.php`:**
 ```php
 'allowed_origins' => [
-    'https://kasir-pos.sunnflower.site',
+    'https://kasir-pos.sunnflower.site/',
     'http://localhost:4173',
 ],
 ```
 
 2. **Check `.env`:**
 ```env
-FRONTEND_URL=https://kasir-pos.sunnflower.site
+FRONTEND_URL=https://kasir-pos.sunnflower.site/
 ```
 
 3. **Clear config cache:**

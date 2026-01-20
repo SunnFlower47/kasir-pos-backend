@@ -16,6 +16,8 @@ class PurchaseItem extends Model
         'quantity',
         'unit_price',
         'total_price',
+        'unit_id',
+        'conversion_factor',
     ];
 
     protected function casts(): array
@@ -41,6 +43,14 @@ class PurchaseItem extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    /**
+     * Get the unit that owns the purchase item.
+     */
+    public function unit(): BelongsTo
+    {
+        return $this->belongsTo(Unit::class);
     }
 
     /**

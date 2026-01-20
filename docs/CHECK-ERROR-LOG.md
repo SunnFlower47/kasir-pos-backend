@@ -78,7 +78,7 @@ php artisan tinker
 Di dalam tinker:
 ```php
 $request = Request::create('/api/v1/login', 'OPTIONS', [], [], [], [
-    'HTTP_Origin' => 'https://kasir-pos.sunnflower.site',
+    'HTTP_Origin' => 'https://kasir-pos.sunnflower.site/',
 ]);
 $response = app()->handle($request);
 dd($response->getStatusCode(), $response->headers->all());

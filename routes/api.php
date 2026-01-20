@@ -16,10 +16,198 @@ use Illuminate\Support\Facades\Route;
 */
 
 // Public routes
+Route::prefix('v2')->group(function () {
+    // V2 Authentication
+    Route::post('/otp/send', [\App\Http\Controllers\Api\V2\OtpController::class, 'send']);
+    Route::post('/otp/verify', [\App\Http\Controllers\Api\V2\OtpController::class, 'verify']);
+    Route::post('/register', [\App\Http\Controllers\Api\V2\AuthController::class, 'register']);
+    Route::post('/login', [\App\Http\Controllers\Api\V2\AuthController::class, 'login'])
+        ->middleware('throttle:10,1');
+        
+    Route::post('/auth/forgot-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'forgotPassword']);
+    // Route::post('/auth/verify-reset-code', ...); // REMOVED: Link-based reset
+    Route::post('/auth/reset-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'resetPassword']);
+    
+    // Public Midtrans Callback (Webhook)
+    Route::post('/midtrans/callback', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'callback']);
+
+    // Protected Subscription Routes
+    Route::middleware(['auth:sanctum', 'tenant.suspended'])->group(function () {
+        Route::get('/subscription', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'index']);
+        Route::get('/subscription/history', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'history']); // New Route
+        Route::post('/subscription/trial', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'activateTrial']);
+        Route::post('/subscription/pay', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'createPayment']);
+        Route::post('/subscription/check-status', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'checkStatus']);
+
+        // Profile & Settings
+        Route::get('/profile', [\App\Http\Controllers\Api\V2\AuthController::class, 'profile']);
+        Route::put('/profile', [\App\Http\Controllers\Api\V2\AuthController::class, 'updateProfile']);
+        Route::put('/profile/password', [\App\Http\Controllers\Api\V2\AuthController::class, 'updatePassword']);
+        Route::put('/company', [\App\Http\Controllers\Api\V2\CompanyController::class, 'update']);
+    });
+
+    // Public Subscription Routes
+    Route::get('/subscription/plans', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'plans']);
+
+    // --- MIGRATED V2 POS ROUTES ---
+    Route::get('purchases/{purchase}/print', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'print']);
+
+    Route::middleware(['auth:sanctum', 'tenant.suspended'])->group(function () {
+        Route::post('/logout', [\App\Http\Controllers\Api\V2\AuthController::class, 'logout']);
+
+        // Products
+        Route::get('products', [\App\Http\Controllers\Api\V2\ProductController::class, 'index']);
+        Route::get('products/{product}', [\App\Http\Controllers\Api\V2\ProductController::class, 'show']);
+        Route::get('products/barcode/scan', [\App\Http\Controllers\Api\V2\ProductController::class, 'getByBarcode']);
+        Route::post('products', [\App\Http\Controllers\Api\V2\ProductController::class, 'store']);
+        Route::put('products/{product}', [\App\Http\Controllers\Api\V2\ProductController::class, 'update']);
+        Route::delete('products/{product}', [\App\Http\Controllers\Api\V2\ProductController::class, 'destroy']);
+
+        // Categories
+        Route::get('categories', [\App\Http\Controllers\Api\V2\CategoryController::class, 'index']);
+        Route::get('categories/{category}', [\App\Http\Controllers\Api\V2\CategoryController::class, 'show']);
+        Route::post('categories', [\App\Http\Controllers\Api\V2\CategoryController::class, 'store']);
+        Route::put('categories/{category}', [\App\Http\Controllers\Api\V2\CategoryController::class, 'update']);
+        Route::delete('categories/{category}', [\App\Http\Controllers\Api\V2\CategoryController::class, 'destroy']);
+
+        // Units
+        Route::get('units', [\App\Http\Controllers\Api\V2\UnitController::class, 'index']);
+        Route::get('units/{unit}', [\App\Http\Controllers\Api\V2\UnitController::class, 'show']);
+        Route::post('units', [\App\Http\Controllers\Api\V2\UnitController::class, 'store']);
+        Route::put('units/{unit}', [\App\Http\Controllers\Api\V2\UnitController::class, 'update']);
+        Route::delete('units/{unit}', [\App\Http\Controllers\Api\V2\UnitController::class, 'destroy']);
+
+        // Stocks
+        Route::get('stocks', [\App\Http\Controllers\Api\V2\StockController::class, 'index']);
+        Route::get('stocks/movements', [\App\Http\Controllers\Api\V2\StockController::class, 'movements']);
+        Route::post('stocks/adjust', [\App\Http\Controllers\Api\V2\StockController::class, 'adjust']);
+        Route::post('stocks/opname', [\App\Http\Controllers\Api\V2\StockController::class, 'opname']);
+        Route::post('stocks/incoming', [\App\Http\Controllers\Api\V2\StockController::class, 'incoming']);
+        Route::post('stocks/transfer', [\App\Http\Controllers\Api\V2\StockController::class, 'transfer']);
+        Route::get('stocks/low-stock-alerts', [\App\Http\Controllers\Api\V2\StockController::class, 'lowStockAlerts']);
+        
+        // Stock Transfers
+        Route::apiResource('stock-transfers', \App\Http\Controllers\Api\V2\StockTransferController::class);
+        Route::post('stock-transfers/{stockTransfer}/approve', [\App\Http\Controllers\Api\V2\StockTransferController::class, 'approve']);
+        Route::post('stock-transfers/{stockTransfer}/cancel', [\App\Http\Controllers\Api\V2\StockTransferController::class, 'cancel']);
+
+        // Transactions
+        Route::apiResource('transactions', \App\Http\Controllers\Api\V2\TransactionController::class);
+        Route::post('transactions/{transaction}/refund', [\App\Http\Controllers\Api\V2\TransactionController::class, 'refund']);
+        Route::post('transactions/{transaction}/settle', [\App\Http\Controllers\Api\V2\TransactionController::class, 'settle']);
+
+        // Receipts
+        Route::get('transactions/{transaction}/receipt/pdf', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'generatePdf']);
+        Route::get('transactions/{transaction}/receipt/simple', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'generateSimplePdf']);
+        Route::get('transactions/{transaction}/receipt/58mm', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'generate58mmPdf']);
+        Route::get('transactions/{transaction}/receipt/html', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'generateHtml']);
+
+        // Shift Closings
+        Route::get('shift-closings/last', [\App\Http\Controllers\Api\V2\ShiftClosingController::class, 'getLastClosing']);
+        Route::post('shift-closings', [\App\Http\Controllers\Api\V2\ShiftClosingController::class, 'store']);
+        Route::get('shift-closings', [\App\Http\Controllers\Api\V2\ShiftClosingController::class, 'index']);
+
+        // Customers
+        Route::apiResource('customers', \App\Http\Controllers\Api\V2\CustomerController::class);
+        Route::post('customers/{customer}/loyalty/add', [\App\Http\Controllers\Api\V2\CustomerController::class, 'addLoyaltyPoints']);
+        Route::post('customers/{customer}/loyalty/redeem', [\App\Http\Controllers\Api\V2\CustomerController::class, 'redeemLoyaltyPoints']);
+
+        // Suppliers
+        Route::apiResource('suppliers', \App\Http\Controllers\Api\V2\SupplierController::class);
+
+        // Purchases
+        Route::apiResource('purchases', \App\Http\Controllers\Api\V2\PurchaseController::class);
+        Route::patch('purchases/{purchase}/status', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'updateStatus']);
+
+        // Outlets
+        Route::apiResource('outlets', \App\Http\Controllers\Api\V2\OutletController::class);
+        Route::post('outlets/{outlet}/logo', [\App\Http\Controllers\Api\V2\OutletController::class, 'uploadLogo']);
+        Route::get('outlets/{outlet}/dashboard', [\App\Http\Controllers\Api\V2\OutletController::class, 'dashboard']);
+
+        // Dashboard
+        Route::get('dashboard', [\App\Http\Controllers\Api\V2\DashboardController::class, 'index']);
+        Route::get('dashboard/outlet-comparison', [\App\Http\Controllers\Api\V2\DashboardController::class, 'outletComparison']);
+
+        // Reports
+        Route::get('reports/expenses', [\App\Http\Controllers\Api\V2\ReportController::class, 'expenses']);
+        Route::get('reports/sales', [\App\Http\Controllers\Api\V2\ReportController::class, 'sales']);
+        Route::get('reports/profit', [\App\Http\Controllers\Api\V2\ReportController::class, 'profit']);
+        Route::get('reports/top-products', [\App\Http\Controllers\Api\V2\ReportController::class, 'topProducts']);
+        Route::get('reports/business-intelligence', [\App\Http\Controllers\Api\V2\AdvancedReportController::class, 'businessIntelligence']);
+        Route::get('reports/enhanced', [\App\Http\Controllers\Api\V2\EnhancedReportController::class, 'index']);
+        Route::get('reports/financial/comprehensive', [\App\Http\Controllers\Api\V2\FinancialReportController::class, 'comprehensive']);
+        Route::get('reports/financial/summary', [\App\Http\Controllers\Api\V2\FinancialReportController::class, 'summary']);
+        Route::get('reports/purchases', [\App\Http\Controllers\Api\V2\ReportController::class, 'purchases']);
+        Route::get('reports/stocks', [\App\Http\Controllers\Api\V2\ReportController::class, 'stocks']);
+
+        // Expenses
+        Route::apiResource('expenses', \App\Http\Controllers\Api\V2\ExpenseController::class);
+        Route::get('expenses/categories/list', [\App\Http\Controllers\Api\V2\ExpenseController::class, 'categories']);
+
+        // Settings
+        Route::get('settings', [\App\Http\Controllers\Api\V2\SettingController::class, 'index']);
+        Route::put('settings', [\App\Http\Controllers\Api\V2\SettingController::class, 'update']);
+        Route::get('settings/{group}', [\App\Http\Controllers\Api\V2\SettingController::class, 'getGroup']);
+        Route::put('settings/{group}', [\App\Http\Controllers\Api\V2\SettingController::class, 'updateGroup']);
+        Route::post('settings/logo/upload', [\App\Http\Controllers\Api\V2\SettingController::class, 'uploadLogo']);
+        Route::delete('settings/logo/{type}', [\App\Http\Controllers\Api\V2\SettingController::class, 'deleteLogo']);
+        Route::get('settings/receipt', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'getSettings']);
+        Route::put('settings/receipt', [\App\Http\Controllers\Api\V2\ReceiptController::class, 'updateSettings']);
+
+        // System & Backup (V2)
+        Route::get('system/info', [\App\Http\Controllers\Api\V2\SettingController::class, 'systemInfo']);
+        Route::get('system/backup/history', [\App\Http\Controllers\Api\V2\SettingController::class, 'backups']);
+        Route::post('system/backup/create', [\App\Http\Controllers\Api\V2\SettingController::class, 'backup']);
+        Route::get('system/backup/download/{filename}', [\App\Http\Controllers\Api\V2\SettingController::class, 'downloadBackup']);
+        Route::delete('system/backup/{filename}', [\App\Http\Controllers\Api\V2\SettingController::class, 'deleteBackup']);
+        
+        // Backup Settings (mapped to SystemController as they are not in V2 SettingController yet)
+        Route::get('system/backup/settings', [\App\Http\Controllers\SystemController::class, 'getBackupSettings']);
+        Route::post('system/backup/settings', [\App\Http\Controllers\SystemController::class, 'updateBackupSettings']);
+
+        // --- SYSTEM ADMIN TOOLS (Strict Access) ---
+        Route::middleware(['role:System Admin'])->prefix('system')->group(function () {
+            Route::post('/cache/clear', [\App\Http\Controllers\SystemController::class, 'clearCache']);
+            Route::get('/logs', [\App\Http\Controllers\SystemController::class, 'getLogs']);
+            Route::get('/maintenance', [\App\Http\Controllers\SystemController::class, 'getMaintenanceMode']);
+            Route::post('/maintenance', [\App\Http\Controllers\SystemController::class, 'toggleMaintenanceMode']);
+            Route::post('/impersonate/{user}', [\App\Http\Controllers\SystemController::class, 'impersonate']);
+        });
+
+        // Export/Import
+        Route::get('export/{type}/excel', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'exportExcel']);
+        Route::get('export/{type}/pdf', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'exportPdf']);
+        Route::get('export/template/{type}', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'downloadTemplate']);
+        Route::post('import/{type}', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'import']);
+        Route::post('import/{type}/preview', [\App\Http\Controllers\Api\V2\ExportImportController::class, 'previewImport']);
+
+        // Users & Roles
+        Route::apiResource('users', \App\Http\Controllers\Api\V2\UserController::class);
+        Route::get('users/{user}/permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'getPermissions']);
+        
+        // Roles Management (Full CRUD)
+        Route::apiResource('roles', \App\Http\Controllers\Api\V2\RoleController::class);
+        
+        Route::get('permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'getAllPermissions']);
+        Route::put('roles/{role}/permissions', [\App\Http\Controllers\Api\V2\UserController::class, 'updateRolePermissions']); // Legacy/Alias? The RoleController update handles this now.
+        // We can keep updateRolePermissions for backward compat if frontend uses it, but the new RoleController update() method expects name+permissions.
+        // Let's keep it for now to be safe.
+
+        // Audit Logs
+        Route::get('audit-logs', [\App\Http\Controllers\Api\V2\AuditLogController::class, 'index']);
+        Route::get('audit-logs/statistics', [\App\Http\Controllers\Api\V2\AuditLogController::class, 'statistics']);
+        Route::get('audit-logs/{auditLog}', [\App\Http\Controllers\Api\V2\AuditLogController::class, 'show']);
+        Route::delete('audit-logs/cleanup', [\App\Http\Controllers\Api\V2\AuditLogController::class, 'cleanup']);
+    });
+});
+
 Route::prefix('v1')->group(function () {
     // Authentication routes with rate limiting
     Route::post('/login', [AuthController::class, 'login'])
         ->middleware('throttle:5,1'); // 5 attempts per minute to prevent brute force
+
+    // Public print route (validates token manually via query param)
+    Route::get('purchases/{purchase}/print', [\App\Http\Controllers\Api\PurchaseController::class, 'print']);
 
     // Test route for outlets (PROTECTED - remove in production or restrict to admin)
     if (app()->environment('local', 'development')) {
@@ -33,6 +221,12 @@ Route::prefix('v1')->group(function () {
         });
     }
 
+    // Apply CheckSubscription middleware to all protected V1 routes (optional, but recommended for security)
+    // For now, we'll keeping V1 as legacy/internal, but in production we should likely apply it here too.
+    // To strictly follow "V2 separates new logic", users using V1 endpoints won't get subscription checks unless we add it.
+    // Given the requirement "accounts without sub cannot login", V2 Controller handles that on login.
+    // But middleware ensures even with a valid token they are blocked.
+    
     // Receipt routes - Require authentication for security
     Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
         Route::get('transactions/{transaction}/receipt/pdf', [\App\Http\Controllers\Api\ReceiptController::class, 'generatePdf']);
@@ -136,6 +330,7 @@ Route::prefix('v1')->group(function () {
         // Transaction management (POS) - All roles can create and view transactions
         Route::apiResource('transactions', \App\Http\Controllers\Api\TransactionController::class);
         Route::post('transactions/{transaction}/refund', [\App\Http\Controllers\Api\TransactionController::class, 'refund']);
+        Route::post('transactions/{transaction}/settle', [\App\Http\Controllers\Api\TransactionController::class, 'settle']);
 
         // Shift closing management - All authenticated users can access
         Route::get('shift-closings/last', [\App\Http\Controllers\Api\ShiftClosingController::class, 'getLastClosing']);

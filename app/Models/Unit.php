@@ -8,9 +8,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Unit extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'name',
         'symbol',
         'description',

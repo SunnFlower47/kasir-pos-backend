@@ -21,7 +21,11 @@ return [
 
     'allowed_origins' => [
         'https://kasir-pos.sunnflower.site',
-        
+        'https://luma-pos.sunnflower.site',
+        'http://localhost:5174', // Frontend Development
+        'http://localhost:4173', // Alternative Frontend Port
+        'http://localhost:4174', // Current Frontend Port
+        'http://localhost:3000', // React Standard Port
         // Note: Electron app origins are handled by AllowElectronOrigin middleware
         // This allows Electron app to work without exposing localhost to web browser
     ],

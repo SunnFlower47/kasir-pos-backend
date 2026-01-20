@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class StockMovement extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'product_id',
         'outlet_id',
         'type',

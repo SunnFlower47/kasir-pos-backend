@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
+use Illuminate\Validation\Rule;
 
 class UnitController extends Controller
 {
@@ -46,7 +47,7 @@ class UnitController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        if (!$user || !$user->can('categories.create')) {
+        if (!$user || (!$user->hasRole('Super Admin') && !$user->can('units.create'))) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -55,7 +56,7 @@ class UnitController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255|unique:units,name',
-            'symbol' => 'required|string|max:10|unique:units,symbol',
+            'symbol' => 'required|string|max:50|unique:units,symbol',
         ]);
 
         $unit = Unit::create($request->all());
@@ -89,7 +90,7 @@ class UnitController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        if (!$user || !$user->can('categories.edit')) {
+        if (!$user || (!$user->hasRole('Super Admin') && !$user->can('units.edit'))) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
@@ -98,7 +99,7 @@ class UnitController extends Controller
 
         $request->validate([
             'name' => 'required|string|max:255|unique:units,name,' . $unit->id,
-            'symbol' => 'required|string|max:10|unique:units,symbol,' . $unit->id,
+            'symbol' => 'required|string|max:50|unique:units,symbol,' . $unit->id,
         ]);
 
         $unit->update($request->all());
@@ -117,7 +118,7 @@ class UnitController extends Controller
     {
         /** @var User $user */
         $user = Auth::user();
-        if (!$user || !$user->can('categories.delete')) {
+        if (!$user || (!$user->hasRole('Super Admin') && !$user->can('units.delete'))) {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'

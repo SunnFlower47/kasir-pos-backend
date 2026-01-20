@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class StockTransfer extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'transfer_number',
         'from_outlet_id',
         'to_outlet_id',

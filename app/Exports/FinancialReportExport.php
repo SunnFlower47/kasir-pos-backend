@@ -51,7 +51,7 @@ class FinancialReportExport implements WithMultipleSheets
     }
 }
 
-class FinancialReportSummarySheet extends BaseReportSheet
+class FinancialReportSummarySheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     protected $data;
 
@@ -84,15 +84,15 @@ class FinancialReportSummarySheet extends BaseReportSheet
     {
         return [
             $row['periode'] ?? '',
-            number_format($row['total_pendapatan'] ?? 0, 2, '.', ''),
-            number_format($row['total_refund'] ?? 0, 2, '.', ''),
-            number_format($row['pendapatan_bersih'] ?? 0, 2, '.', ''),
-            number_format($row['total_pengeluaran'] ?? 0, 2, '.', ''),
-            number_format($row['pengeluaran_pembelian'] ?? 0, 2, '.', ''),
-            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
-            number_format($row['total_hpp'] ?? 0, 2, '.', ''),
-            number_format($row['laba_kotor'] ?? 0, 2, '.', ''),
-            number_format($row['laba_bersih'] ?? 0, 2, '.', ''),
+            $row['total_pendapatan'] ?? 0,
+            $row['total_refund'] ?? 0,
+            $row['pendapatan_bersih'] ?? 0,
+            $row['total_pengeluaran'] ?? 0,
+            $row['pengeluaran_pembelian'] ?? 0,
+            $row['pengeluaran_operasional'] ?? 0,
+            $row['total_hpp'] ?? 0,
+            $row['laba_kotor'] ?? 0,
+            $row['laba_bersih'] ?? 0,
         ];
     }
 
@@ -112,13 +112,41 @@ class FinancialReportSummarySheet extends BaseReportSheet
         ];
     }
 
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true, 'size' => 12],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'B' => '#,##0.00',
+            'C' => '#,##0.00',
+            'D' => '#,##0.00',
+            'E' => '#,##0.00',
+            'F' => '#,##0.00',
+            'G' => '#,##0.00',
+            'H' => '#,##0.00',
+            'I' => '#,##0.00',
+            'J' => '#,##0.00',
+        ];
+    }
+
     public function title(): string
     {
         return 'Ringkasan';
     }
 }
 
-class FinancialReportRevenueSheet extends BaseReportSheet
+class FinancialReportRevenueSheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     protected $data;
 
@@ -145,11 +173,11 @@ class FinancialReportRevenueSheet extends BaseReportSheet
     public function map($row): array
     {
         return [
-            number_format($row['total_pendapatan'] ?? 0, 2, '.', ''),
+            $row['total_pendapatan'] ?? 0,
             (int)($row['total_transaksi'] ?? 0),
-            number_format($row['rata_transaksi'] ?? 0, 2, '.', ''),
-            number_format($row['total_refund'] ?? 0, 2, '.', ''),
-            number_format($row['pendapatan_bersih'] ?? 0, 2, '.', ''),
+            $row['rata_transaksi'] ?? 0,
+            $row['total_refund'] ?? 0,
+            $row['pendapatan_bersih'] ?? 0,
         ];
     }
 
@@ -158,13 +186,36 @@ class FinancialReportRevenueSheet extends BaseReportSheet
         return ['Total Pendapatan', 'Total Transaksi', 'Rata-rata Transaksi', 'Total Refund', 'Pendapatan Bersih'];
     }
 
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'A' => '#,##0.00',
+            'C' => '#,##0.00',
+            'D' => '#,##0.00',
+            'E' => '#,##0.00',
+        ];
+    }
+
     public function title(): string
     {
         return 'Pendapatan';
     }
 }
 
-class FinancialReportExpensesSheet extends BaseReportSheet
+class FinancialReportExpensesSheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     protected $data;
 
@@ -190,9 +241,9 @@ class FinancialReportExpensesSheet extends BaseReportSheet
     public function map($row): array
     {
         return [
-            number_format($row['total_pengeluaran'] ?? 0, 2, '.', ''),
-            number_format($row['pengeluaran_pembelian'] ?? 0, 2, '.', ''),
-            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
+            $row['total_pengeluaran'] ?? 0,
+            $row['pengeluaran_pembelian'] ?? 0,
+            $row['pengeluaran_operasional'] ?? 0,
             (int)($row['jumlah_pembelian'] ?? 0),
         ];
     }
@@ -202,13 +253,35 @@ class FinancialReportExpensesSheet extends BaseReportSheet
         return ['Total Pengeluaran', 'Pengeluaran Pembelian', 'Pengeluaran Operasional', 'Jumlah Pembelian'];
     }
 
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'A' => '#,##0.00',
+            'B' => '#,##0.00',
+            'C' => '#,##0.00',
+        ];
+    }
+
     public function title(): string
     {
         return 'Pengeluaran';
     }
 }
 
-class FinancialReportProfitLossSheet extends BaseReportSheet
+class FinancialReportProfitLossSheet extends BaseReportSheet implements \Maatwebsite\Excel\Concerns\WithStyles, \Maatwebsite\Excel\Concerns\ShouldAutoSize, \Maatwebsite\Excel\Concerns\WithColumnFormatting
 {
     protected $data;
 
@@ -236,18 +309,42 @@ class FinancialReportProfitLossSheet extends BaseReportSheet
     public function map($row): array
     {
         return [
-            number_format($row['laba_kotor'] ?? 0, 2, '.', ''),
-            number_format($row['laba_bersih'] ?? 0, 2, '.', ''),
-            number_format($row['pengeluaran_operasional'] ?? 0, 2, '.', ''),
-            number_format($row['margin_laba_kotor'] ?? 0, 2, '.', '') . '%',
-            number_format($row['margin_laba_bersih'] ?? 0, 2, '.', '') . '%',
+            $row['laba_kotor'] ?? 0,
+            $row['laba_bersih'] ?? 0,
+            $row['pengeluaran_operasional'] ?? 0,
+            ($row['margin_laba_kotor'] ?? 0) / 100, // Excel expects decimal for percentage
+            ($row['margin_laba_bersih'] ?? 0) / 100,
             $row['menguntungkan'] ?? 'Tidak',
         ];
     }
 
     public function headings(): array
     {
-        return ['Laba Kotor', 'Laba Bersih', 'Pengeluaran Operasional', 'Margin Laba Kotor (%)', 'Margin Laba Bersih (%)', 'Menguntungkan'];
+        return ['Laba Kotor', 'Laba Bersih', 'Pengeluaran Operasional', 'Margin Laba Kotor', 'Margin Laba Bersih', 'Menguntungkan'];
+    }
+
+    public function styles(\PhpOffice\PhpSpreadsheet\Worksheet\Worksheet $sheet)
+    {
+        return [
+            1 => [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E3F2FD']
+                ],
+            ],
+        ];
+    }
+
+    public function columnFormats(): array
+    {
+        return [
+            'A' => '#,##0.00',
+            'B' => '#,##0.00',
+            'C' => '#,##0.00',
+            'D' => '0.00%',
+            'E' => '0.00%',
+        ];
     }
 
     public function title(): string

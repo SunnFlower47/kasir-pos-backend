@@ -24,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'security.headers' => \App\Http\Middleware\SecurityHeaders::class,
             'electron.origin' => \App\Http\Middleware\AllowElectronOrigin::class,
             'cors' => \App\Http\Middleware\HandleCors::class,
+            'tenant.suspended' => \App\Http\Middleware\CheckTenantSuspended::class,
         ]);
 
         // CORS FIRST - handle OPTIONS before anything else
@@ -37,6 +38,31 @@ return Application::configure(basePath: dirname(__DIR__))
         if (env('APP_ENV') === 'production') {
             $middleware->append(\App\Http\Middleware\ForceHttps::class);
         }
+
+        // MOVED: ResetSpatieCache now attached to groups to ensure Auth is ready
+
+        $middleware->appendToGroup('web', [
+             \App\Http\Middleware\ResetSpatieCache::class,
+        ]);
+        
+        $middleware->appendToGroup('api', [
+             \App\Http\Middleware\ResetSpatieCache::class,
+        ]);
+
+
+        // Redirect guests to correct login page
+        $middleware->redirectGuestsTo(function (Illuminate\Http\Request $request) {
+            if ($request->is('admin/*')) {
+                return route('admin.login');
+            }
+            return route('admin.login'); // Fallback for now since we don't have other web login
+        });
+
+        // Exclude Midtrans Callback from CSRF
+        $middleware->validateCsrfTokens(except: [
+            'api/v2/midtrans/callback',
+            'api/midtrans/callback'
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle API routes - return JSON responses

@@ -9,9 +9,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Transaction extends Model
 {
-    use HasFactory;
+    use HasFactory, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'transaction_number',
         'outlet_id',
         'customer_id',

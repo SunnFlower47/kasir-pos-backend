@@ -56,7 +56,7 @@ Telah diperbaiki nested `env()` calls di config files berikut:
 // ✅ FIXED (setelah update keamanan - CORS error)
 // Menghapus dependency pada config('app.env') yang tidak tersedia saat config di-cache
 'allowed_origins' => [
-    'https://kasir-pos.sunnflower.site', // Production frontend
+    'https://kasir-pos.sunnflower.site/', // Production frontend
     'http://localhost:4173', // Local development
     'http://127.0.0.1:4173', // Local development
 ],

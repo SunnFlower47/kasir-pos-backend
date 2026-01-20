@@ -62,7 +62,7 @@ async function handleRequest(request) {
     return new Response(null, {
       status: 204,
       headers: {
-        'Access-Control-Allow-Origin': 'https://kasir-pos.sunnflower.site',
+        'Access-Control-Allow-Origin': 'https://kasir-pos.sunnflower.site/',
         'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, X-Client-Type, X-Client-Version, Accept, Origin',
         'Access-Control-Allow-Credentials': 'true',
@@ -76,7 +76,7 @@ async function handleRequest(request) {
   
   // Add CORS headers to response
   const newHeaders = new Headers(response.headers)
-  newHeaders.set('Access-Control-Allow-Origin', 'https://kasir-pos.sunnflower.site')
+  newHeaders.set('Access-Control-Allow-Origin', 'https://kasir-pos.sunnflower.site/')
   newHeaders.set('Access-Control-Allow-Credentials', 'true')
   
   return new Response(response.body, {
@@ -107,7 +107,7 @@ Untuk test apakah masalahnya dari Cloudflare:
 2. **Test OPTIONS request:**
    ```bash
    curl -v -X OPTIONS \
-        -H "Origin: https://kasir-pos.sunnflower.site" \
+        -H "Origin: https://kasir-pos.sunnflower.site/" \
         -H "Access-Control-Request-Method: POST" \
         https://kasir-pos-api.sunnflower.site/api/v1/login
    ```

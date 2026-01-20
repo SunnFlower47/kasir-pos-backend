@@ -2,10 +2,10 @@
 
 ## 🔧 Masalah
 
-API requests dari frontend (`https://kasir-pos.sunnflower.site`) ke backend (`https://kasir-pos-api.sunnflower.site`) diblokir oleh CORS policy. Error:
+API requests dari frontend (`https://kasir-pos.sunnflower.site/`) ke backend (`https://kasir-pos-api.sunnflower.site`) diblokir oleh CORS policy. Error:
 ```
 Access to XMLHttpRequest at 'https://kasir-pos-api.sunnflower.site/api/v1/profile' 
-from origin 'https://kasir-pos.sunnflower.site' has been blocked by CORS policy: 
+from origin 'https://kasir-pos.sunnflower.site/' has been blocked by CORS policy: 
 Response to preflight request doesn't pass access control check: 
 No 'Access-Control-Allow-Origin' header is present on the requested resource.
 ```
@@ -15,7 +15,7 @@ No 'Access-Control-Allow-Origin' header is present on the requested resource.
 1. **`config/cors.php`** - Origin production sudah ditambahkan:
    ```php
    'allowed_origins' => [
-       'https://kasir-pos.sunnflower.site', // Production frontend
+       'https://kasir-pos.sunnflower.site/', // Production frontend
        'http://localhost:4173', // Local development
        'http://127.0.0.1:4173', // Local development
    ],
@@ -74,7 +74,7 @@ php artisan tinker
 Di dalam tinker:
 ```php
 config('cors.allowed_origins');
-// Seharusnya menampilkan array dengan 'https://kasir-pos.sunnflower.site'
+// Seharusnya menampilkan array dengan 'https://kasir-pos.sunnflower.site/'
 ```
 
 ### Step 6: Restart Web Server (Jika Perlu)
@@ -94,7 +94,7 @@ sudo systemctl restart php8.2-fpm
 
 ```bash
 # Test apakah API mengirim CORS headers
-curl -H "Origin: https://kasir-pos.sunnflower.site" \
+curl -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: GET" \
      -H "Access-Control-Request-Headers: Content-Type,Authorization" \
      -X OPTIONS \
@@ -104,7 +104,7 @@ curl -H "Origin: https://kasir-pos.sunnflower.site" \
 
 Response harus mengandung header:
 ```
-Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site
+Access-Control-Allow-Origin: https://kasir-pos.sunnflower.site/
 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, PATCH, OPTIONS
 Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Client-Type, X-Client-Version
 Access-Control-Allow-Credentials: true

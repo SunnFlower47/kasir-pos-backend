@@ -23,10 +23,27 @@ class StoreProductRequest extends FormRequest
      */
     public function rules(): array
     {
+        $tenantId = Auth::user()->tenant_id;
+
         return [
-            'name' => 'required|string|max:255|unique:products,name',
-            'sku' => 'nullable|string|unique:products,sku|max:100',
-            'barcode' => 'nullable|string|unique:products,barcode|max:100',
+            'name' => [
+                'required', 
+                'string', 
+                'max:255', 
+                \Illuminate\Validation\Rule::unique('products')->where('tenant_id', $tenantId)
+            ],
+            'sku' => [
+                'nullable', 
+                'string', 
+                'max:100', 
+                \Illuminate\Validation\Rule::unique('products')->where('tenant_id', $tenantId)
+            ],
+            'barcode' => [
+                'nullable', 
+                'string', 
+                'max:100', 
+                \Illuminate\Validation\Rule::unique('products')->where('tenant_id', $tenantId)
+            ],
             'description' => 'nullable|string',
             'category_id' => 'required|exists:categories,id',
             'unit_id' => 'required|exists:units,id',
@@ -34,8 +51,26 @@ class StoreProductRequest extends FormRequest
             'selling_price' => 'required|numeric|min:0',
             'wholesale_price' => 'nullable|numeric|min:0',
             'min_stock' => 'required|numeric|min:0',
-            'image' => 'nullable|string',
+            'image' => 'nullable|image|max:2048',
             'is_active' => 'boolean',
+            
+            // Multiple Units Validation
+            'units' => 'nullable|array',
+            'units.*.unit_id' => 'required|exists:units,id|distinct',
+            'units.*.conversion_factor' => 'required|numeric|min:0.01',
+            'units.*.purchase_price' => 'nullable|numeric|min:0',
+            'units.*.selling_price' => 'nullable|numeric|min:0',
+            'units.*.wholesale_price' => 'nullable|numeric|min:0',
+            'units.*.barcode' => [
+                'nullable',
+                'string',
+                'max:100',
+                'distinct',
+                // Check uniqueness in products table (main barcodes)
+                \Illuminate\Validation\Rule::unique('products', 'barcode')->where('tenant_id', $tenantId),
+                // Check uniqueness in product_units table
+                \Illuminate\Validation\Rule::unique('product_units', 'barcode')->where('tenant_id', $tenantId),
+            ],
         ];
     }
 

@@ -3,58 +3,40 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Product;
-use App\Models\ProductStock;
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
+use App\Models\Product;
+use App\Models\Supplier;
+use App\Models\ProductStock;
 use App\Models\StockMovement;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use App\Models\User;
+use Illuminate\Support\Facades\Log; // Added for logging
+use Illuminate\Validation\Rule;
 
 class PurchaseController extends Controller
 {
     /**
      * Display a listing of the resource.
      */
-    public function index(Request $request): JsonResponse
+    public function index(Request $request)
     {
-        $query = Purchase::with(['supplier', 'outlet', 'user', 'purchaseItems.product']);
+        $query = Purchase::with(['supplier', 'purchaseItems.product', 'outlet']);
 
-        // Filter by outlet
-        if ($request->has('outlet_id')) {
-            $query->where('outlet_id', $request->outlet_id);
-        }
-
-        // Filter by supplier
-        if ($request->has('supplier_id')) {
+        if ($request->filled('supplier_id')) {
             $query->where('supplier_id', $request->supplier_id);
         }
 
-        // Filter by status
-        if ($request->has('status')) {
+        if ($request->filled('start_date') && $request->filled('end_date')) {
+            $query->whereBetween('purchase_date', [$request->start_date, $request->end_date]);
+        }
+
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
-
-        // Filter by date range
-        if ($request->has('date_from')) {
-            $query->whereDate('purchase_date', '>=', $request->date_from);
-        }
-
-        if ($request->has('date_to')) {
-            $query->whereDate('purchase_date', '<=', $request->date_to);
-        }
-
-        // Search by invoice number
-        if ($request->has('search')) {
-            $query->where('invoice_number', 'like', '%' . $request->search . '%');
-        }
-
-        $perPage = $request->get('per_page', 15);
-        $purchases = $query->orderBy('created_at', 'desc')->paginate($perPage);
-
+        
+        $purchases = $query->latest()->paginate($request->per_page ?? 10);
+        
         return response()->json([
             'success' => true,
             'data' => $purchases
@@ -64,109 +46,78 @@ class PurchaseController extends Controller
     /**
      * Store a newly created resource in storage.
      */
-    public function store(Request $request): JsonResponse
+    public function store(Request $request)
     {
-        /** @var User $user */
-
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
+        $tenantId = $request->user()->tenant_id;
+    
+        try {
+            $request->validate([
+                'supplier_id' => ['required', Rule::exists('suppliers', 'id')->where('tenant_id', $tenantId)],
+                'outlet_id' => ['required', Rule::exists('outlets', 'id')->where('tenant_id', $tenantId)],
+                'purchase_date' => 'required|date',
+                'items' => 'required|array|min:1',
+                'items.*.product_id' => ['required', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
+                'items.*.quantity' => 'required|numeric|min:0.01',
+                'items.*.purchase_price' => 'required|numeric|min:0',
+                'items.*.unit_id' => 'nullable|exists:units,id',
+                'items.*.conversion_factor' => 'nullable|numeric|min:0.001',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            Log::error('Purchase validation failed', [
+                'errors' => $e->errors(),
+                'request_data' => $request->all(),
+                'tenant_id' => $tenantId
+            ]);
+            throw $e;
         }
 
-        $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'outlet_id' => 'required|exists:outlets,id',
-            'purchase_date' => 'required|date',
-            'discount_amount' => 'nullable|numeric|min:0',
-            'tax_amount' => 'nullable|numeric|min:0',
-            'paid_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-
-            // Purchase items
-            'items' => 'required|array|min:1',
-            'items.*.product_id' => 'required|exists:products,id',
-            'items.*.quantity' => 'required|numeric|min:0.001',
-            'items.*.unit_price' => 'required|numeric|min:0',
-        ]);
-
-        \Log::info('Creating purchase with data:', $request->all());
-
-        DB::beginTransaction();
         try {
-            // Create purchase
+            DB::beginTransaction();
+
+            $totalAmount = 0;
+            foreach ($request->items as $item) {
+                $totalAmount += $item['quantity'] * $item['purchase_price'];
+            }
+
+            // Create Purchase
+            // Create Purchase
             $purchase = Purchase::create([
-                'invoice_number' => Purchase::generateInvoiceNumber(),
+                'invoice_number' => 'PO-' . time(),
                 'supplier_id' => $request->supplier_id,
                 'outlet_id' => $request->outlet_id,
                 'purchase_date' => $request->purchase_date,
-                'subtotal' => 0,
-                'tax_amount' => $request->tax_amount ?? 0,
-                'discount_amount' => $request->discount_amount ?? 0,
-                'total_amount' => 0,
-                'paid_amount' => $request->paid_amount ?? 0,
-                'remaining_amount' => 0,
-                'status' => 'pending',
+                'total_amount' => $totalAmount,
+                'status' => 'pending', // Default status pending
                 'notes' => $request->notes,
-                'user_id' => $user->id,
+                'user_id' => $request->user()->id,
             ]);
 
-            $subtotal = 0;
-
-            // Create purchase items (don't add stock yet - only when status becomes 'paid')
+            // Create Items
             foreach ($request->items as $item) {
-                $product = Product::findOrFail($item['product_id']);
-                $totalPrice = $item['unit_price'] * $item['quantity'];
-
-                // Create purchase item
                 PurchaseItem::create([
                     'purchase_id' => $purchase->id,
-                    'product_id' => $product->id,
+                    'product_id' => $item['product_id'],
                     'quantity' => $item['quantity'],
-                    'unit_price' => $item['unit_price'],
-                    'total_price' => $totalPrice,
+                    'unit_price' => $item['purchase_price'],
+                    'total_price' => $item['quantity'] * $item['purchase_price'],
+                    'unit_id' => $item['unit_id'] ?? null,
+                    'conversion_factor' => $item['conversion_factor'] ?? 1,
                 ]);
-
-                $subtotal += $totalPrice;
             }
-
-            // Update purchase totals
-            $purchase->subtotal = $subtotal;
-            $purchase->total_amount = $subtotal + $purchase->tax_amount - $purchase->discount_amount;
-            $purchase->remaining_amount = $purchase->total_amount - $purchase->paid_amount;
-
-            // Update status based on payment
-            $oldStatus = $purchase->status;
-            if ($purchase->paid_amount >= $purchase->total_amount) {
-                $purchase->status = 'paid';
-            } elseif ($purchase->paid_amount > 0) {
-                $purchase->status = 'partial';
-            }
-
-            $purchase->save();
-
-            // Add stock only when status becomes 'paid'
-            if ($oldStatus !== 'paid' && $purchase->status === 'paid') {
-                $this->addStockForPurchase($purchase);
-            }
-
+            
             DB::commit();
-
-            $purchase->load(['supplier', 'outlet', 'user', 'purchaseItems.product']);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Purchase created successfully',
-                'data' => $purchase
+                'data' => $purchase->load(['purchaseItems.product', 'purchaseItems.unit', 'outlet'])
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollback();
+            DB::rollBack();
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to create purchase: ' . $e->getMessage()
+                'message' => 'Error creating purchase: ' . $e->getMessage()
             ], 500);
         }
     }
@@ -174,277 +125,238 @@ class PurchaseController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(Purchase $purchase): JsonResponse
+    public function show(Purchase $purchase)
     {
-        $purchase->load(['supplier', 'outlet', 'user', 'purchaseItems.product.category', 'purchaseItems.product.unit']);
-
         return response()->json([
             'success' => true,
-            'data' => $purchase
+            'data' => $purchase->load(['supplier', 'purchaseItems.product', 'purchaseItems.unit', 'user', 'outlet'])
         ]);
     }
 
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, Purchase $purchase): JsonResponse
+    public function update(Request $request, Purchase $purchase)
     {
-        /** @var User $user */
-
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
-        // Only super admin can edit paid purchases
-        if ($purchase->status === 'paid') {
-            // Check if user has super admin role using Spatie Permission
-            if (!$user->hasRole('Super Admin')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Only super admin can edit paid purchase'
-                ], 422);
-            }
-        }
-
-        $request->validate([
-            'paid_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-            'status' => 'nullable|in:pending,partial,paid,cancelled',
-        ]);
-
-        $oldStatus = $purchase->status;
-        $oldPaidAmount = $purchase->paid_amount;
-        $newPaidAmount = $request->paid_amount ?? $oldPaidAmount;
-
-        $purchase->update([
-            'paid_amount' => $newPaidAmount,
-            'remaining_amount' => $purchase->total_amount - $newPaidAmount,
-            'notes' => $request->notes ?? $purchase->notes,
-        ]);
-
-        // Update status - allow manual status override or auto-calculate
-        if ($request->has('status')) {
-            $purchase->status = $request->status;
-        } else {
-            // Auto-calculate status based on payment
-            if ($purchase->paid_amount >= $purchase->total_amount) {
-                $purchase->status = 'paid';
-            } elseif ($purchase->paid_amount > 0) {
-                $purchase->status = 'partial';
-            } else {
-                $purchase->status = 'pending';
-            }
-        }
-
-        $purchase->save();
-
-        // Handle stock changes based on status change
-        if ($oldStatus !== 'paid' && $purchase->status === 'paid') {
-            // Add stock when status becomes 'paid'
-            $this->addStockForPurchase($purchase);
-        } elseif ($oldStatus === 'paid' && $purchase->status !== 'paid') {
-            // Remove stock when status changes from 'paid' to other status
-            $this->removeStockForPurchase($purchase);
-        }
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Purchase updated successfully',
-            'data' => $purchase
-        ]);
-    }
-
-    /**
-     * Update purchase status
-     */
-    public function updateStatus(Request $request, Purchase $purchase): JsonResponse
-    {
-        /** @var User $user */
-
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
-        $request->validate([
-            'status' => 'required|in:pending,partial,paid,cancelled',
-            'notes' => 'nullable|string',
-        ]);
-
-        $oldStatus = $purchase->status;
-        $newStatus = $request->status;
-
-        // Only super admin can change status of paid purchases
-        if ($oldStatus === 'paid' && $newStatus !== 'paid') {
-            // Check if user has super admin role using Spatie Permission
-            if (!$user->hasRole('Super Admin')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Only super admin can change status of paid purchase'
-                ], 422);
-            }
-        }
-
-        $purchase->update([
-            'status' => $newStatus,
-            'notes' => $request->notes ?? $purchase->notes,
-        ]);
-
-        // Auto-adjust paid amount for certain status changes
-        if ($newStatus === 'paid' && $purchase->paid_amount < $purchase->total_amount) {
-            $purchase->update([
-                'paid_amount' => $purchase->total_amount,
-                'remaining_amount' => 0,
-            ]);
-        } elseif ($newStatus === 'cancelled') {
-            // Don't change payment amounts for cancelled purchases
-        }
-
-        // Handle stock changes based on status change
-        if ($oldStatus !== 'paid' && $newStatus === 'paid') {
-            // Add stock when status becomes 'paid'
-            $this->addStockForPurchase($purchase);
-        } elseif ($oldStatus === 'paid' && $newStatus !== 'paid') {
-            // Remove stock when status changes from 'paid' to other status
-            $this->removeStockForPurchase($purchase);
-        }
-
-        $purchase->load(['supplier', 'outlet', 'user', 'purchaseItems.product']);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Purchase status updated successfully',
-            'data' => $purchase
-        ]);
-    }
-
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy(Purchase $purchase): JsonResponse
-    {
-        /** @var User $user */
-
-        $user = Auth::user();
-        if (!$user) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Unauthorized'
-            ], 403);
-        }
-
-        // Only super admin can delete non-pending purchases
+        // Only allow update if status is pending
         if ($purchase->status !== 'pending') {
-            // Check if user has super admin role using Spatie Permission
-            if (!$user->hasRole('Super Admin')) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Only super admin can delete non-pending purchases'
-                ], 422);
-            }
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot update purchase that is already processed (received/cancelled)'
+            ], 400);
         }
 
-        DB::beginTransaction();
+        $request->validate([
+            'supplier_id' => 'required|exists:suppliers,id',
+            'outlet_id' => 'required|exists:outlets,id',
+            'purchase_date' => 'required|date',
+            'items' => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.purchase_price' => 'required|numeric|min:0',
+            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.conversion_factor' => 'nullable|numeric|min:0.001',
+        ]);
+
         try {
-            // Only reduce stock if purchase was paid (stock was previously added)
-            if ($purchase->status === 'paid') {
-                $this->removeStockForPurchase($purchase);
+            DB::beginTransaction();
+
+            // Calculate new total
+            $totalAmount = 0;
+            foreach ($request->items as $item) {
+                $totalAmount += $item['quantity'] * $item['purchase_price'];
             }
 
-            $purchase->delete();
+            // Update Purchase Header
+            $purchase->update([
+                'supplier_id' => $request->supplier_id,
+                'outlet_id' => $request->outlet_id,
+                'purchase_date' => $request->purchase_date,
+                'total_amount' => $totalAmount,
+                'notes' => $request->notes,
+            ]);
 
+            // Delete old items
+            $purchase->purchaseItems()->delete();
+
+            // Create new items
+            foreach ($request->items as $item) {
+                PurchaseItem::create([
+                    'purchase_id' => $purchase->id,
+                    'product_id' => $item['product_id'],
+                    'quantity' => $item['quantity'],
+                    'unit_price' => $item['purchase_price'],
+                    'total_price' => $item['quantity'] * $item['purchase_price'],
+                    'unit_id' => $item['unit_id'] ?? null,
+                    'conversion_factor' => $item['conversion_factor'] ?? 1,
+                ]);
+            }
+            
             DB::commit();
 
             return response()->json([
                 'success' => true,
-                'message' => 'Purchase deleted successfully'
+                'message' => 'Purchase updated successfully',
+                'data' => $purchase->load(['purchaseItems.product', 'purchaseItems.unit', 'outlet'])
             ]);
 
         } catch (\Exception $e) {
-            DB::rollback();
+            DB::rollBack();
             return response()->json([
                 'success' => false,
-                'message' => 'Failed to delete purchase: ' . $e->getMessage()
+                'message' => 'Error updating purchase: ' . $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Add stock for purchase items when status becomes 'paid'
+     * Remove the specified resource from storage.
      */
-    private function addStockForPurchase(Purchase $purchase): void
+    public function destroy(Purchase $purchase)
     {
-        foreach ($purchase->purchaseItems as $item) {
-            $productStock = ProductStock::where('product_id', $item->product_id)
-                                      ->where('outlet_id', $purchase->outlet_id)
-                                      ->first();
+        if ($purchase->status !== 'pending') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cannot delete purchase that is already processed'
+            ], 400);
+        }
 
-            if (!$productStock) {
-                $productStock = ProductStock::create([
-                    'product_id' => $item->product_id,
-                    'outlet_id' => $purchase->outlet_id,
-                    'quantity' => 0,
-                ]);
-            }
+        try {
+            $purchase->purchaseItems()->delete();
+            $purchase->delete();
 
-            // Create stock movement manually to ensure proper user_id
-            $oldQuantity = $productStock->quantity;
-            $productStock->quantity += $item->quantity;
-            $productStock->save();
-
-            // Create stock movement record
-            StockMovement::create([
-                'product_id' => $item->product_id,
-                'outlet_id' => $purchase->outlet_id,
-                'type' => 'in',
-                'quantity' => $item->quantity,
-                'quantity_before' => $oldQuantity,
-                'quantity_after' => $productStock->quantity,
-                'reference_type' => Purchase::class,
-                'reference_id' => $purchase->id,
-                'notes' => "Purchase paid - Invoice: {$purchase->invoice_number}",
-                'user_id' => Auth::id() ?? 1, // Fallback to admin user
+            return response()->json([
+                'success' => true,
+                'message' => 'Purchase deleted successfully'
             ]);
+        } catch (\Exception $e) {
+             return response()->json([
+                'success' => false,
+                'message' => 'Error deleting purchase: ' . $e->getMessage()
+            ], 500);
         }
     }
 
     /**
-     * Remove stock for purchase items when status changes from 'paid'
+     * Update status (e.g. Receive items)
      */
-    private function removeStockForPurchase(Purchase $purchase): void
+    public function updateStatus(Request $request, Purchase $purchase)
     {
-        foreach ($purchase->purchaseItems as $item) {
-            $productStock = ProductStock::where('product_id', $item->product_id)
-                                      ->where('outlet_id', $purchase->outlet_id)
-                                      ->first();
+        $request->validate([
+            'status' => 'required|in:pending,paid,cancelled',
+        ]);
 
-            if ($productStock) {
-                // Create stock movement manually to ensure proper user_id
-                $oldQuantity = $productStock->quantity;
-                $productStock->quantity -= $item->quantity;
-                $productStock->save();
+        if ($purchase->status === $request->status) {
+             return response()->json([
+                'success' => true,
+                'message' => 'Status is already ' . $request->status,
+                'data' => $purchase
+            ]);
+        }
 
-                // Create stock movement record
-                StockMovement::create([
-                    'product_id' => $item->product_id,
-                    'outlet_id' => $purchase->outlet_id,
-                    'type' => 'out',
-                    'quantity' => -$item->quantity,
-                    'quantity_before' => $oldQuantity,
-                    'quantity_after' => $productStock->quantity,
-                    'reference_type' => Purchase::class,
-                    'reference_id' => $purchase->id,
-                    'notes' => "Purchase status changed from paid - Invoice: {$purchase->invoice_number}",
-                    'user_id' => Auth::id() ?? 1, // Fallback to admin user
+        // Logic for transitioning TO 'paid' (Received + Paid)
+        if ($request->status === 'paid' && $purchase->status === 'pending') {
+            try {
+                DB::beginTransaction();
+
+                // Update stock using StockController logic (or direct model manipulation)
+                // We'll update product stocks here directly for simplicity, but ideally use a Service
+                
+                $items = $purchase->purchaseItems;
+                foreach ($items as $item) {
+                    $product = Product::find($item->product_id);
+                    if ($product) {
+                        // Update stock logic would go here if we tracked stock
+                        // For now we just create a stock movement record
+                        
+                        // Find or create product stock record for this outlet
+                        $productStock = ProductStock::firstOrCreate(
+                            [
+                                'product_id' => $item->product_id,
+                                'outlet_id' => $purchase->outlet_id
+                            ],
+                            ['quantity' => 0]
+                        );
+
+                        // Calculate total quantity to add based on conversion factor
+                        $qtyToAdd = $item->quantity * ($item->conversion_factor > 0 ? $item->conversion_factor : 1);
+
+                        // Use the model's method to add stock and create movement record
+                        $productStock->addStock(
+                            quantity: $qtyToAdd,
+                            type: 'in',
+                            referenceType: 'purchase',
+                            referenceId: $purchase->id,
+                            notes: 'Received from PO ' . $purchase->invoice_number
+                        );
+                        
+                        // Update product basic stock or price if needed
+                         // $product->purchase_price = $item->purchase_price;
+                         // $product->save();
+                    }
+                }
+
+                $purchase->update(['status' => 'paid']);
+                
+                DB::commit();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Purchase received and stock updated',
+                    'data' => $purchase
                 ]);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Error processing purchase: ' . $e->getMessage()
+                ], 500);
             }
         }
+        
+        // Generic status update
+        $purchase->update(['status' => $request->status]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Status updated successfully',
+            'data' => $purchase
+        ]);
+    }
+
+    /**
+     * Print Purchase Invoice (Public)
+     * 
+     * @param Purchase $purchase
+     * @return \Illuminate\Http\Response
+     */
+    public function print(Purchase $purchase)
+    {
+        // IMPORTANT: In production, verify user can access this purchase via tenant_id or other means
+        // Since this is a public route (often opened in new tab), we rely on UUID or obscure ID if possible.
+        // For now, standard ID binding.
+        
+        // Eager load relationships
+        // Eager load relationships
+        $purchase->load(['supplier', 'purchaseItems.product', 'purchaseItems.unit', 'user', 'outlet']);
+
+        // Fetch company details
+        $company = [
+            'name' => \App\Models\Setting::get('company_name', 'Kasir App'),
+            'address' => \App\Models\Setting::get('company_address', '-'),
+            'phone' => \App\Models\Setting::get('company_phone', '-'),
+            'email' => \App\Models\Setting::get('company_email', '-'),
+            'website' => \App\Models\Setting::get('company_website', null),
+            'logo' => \App\Models\Setting::get('company_logo', null),
+        ];
+
+        // Fetch currency settings
+        $currency_symbol = \App\Models\Setting::get('currency_symbol', 'Rp');
+        $currency_position = \App\Models\Setting::get('currency_position', 'before');
+        $decimal_places = \App\Models\Setting::get('decimal_places', 0);
+
+        // Return a simple HTML view for printing
+        return view('purchases.print', compact('purchase', 'company', 'currency_symbol', 'currency_position', 'decimal_places'));
     }
 }

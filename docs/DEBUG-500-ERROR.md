@@ -69,7 +69,7 @@ Cari IP server kamu, lalu test langsung:
 # Contoh: curl -v -X OPTIONS http://103.123.45.67/api/v1/login
 
 curl -v -X OPTIONS \
-     -H "Origin: https://kasir-pos.sunnflower.site" \
+     -H "Origin: https://kasir-pos.sunnflower.site/" \
      -H "Access-Control-Request-Method: POST" \
      http://YOUR_SERVER_IP/api/v1/login
 ```

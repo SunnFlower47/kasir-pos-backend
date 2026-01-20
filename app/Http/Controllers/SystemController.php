@@ -16,6 +16,196 @@ use App\Models\Transaction;
 class SystemController extends Controller
 {
     /**
+     * Clear system cache (System Admin Only)
+     */
+    public function clearCache(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user || !$user->hasRole('System Admin')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        try {
+            Artisan::call('optimize:clear');
+            Artisan::call('config:clear');
+            Artisan::call('route:clear');
+            Artisan::call('view:clear');
+
+            // Log action
+            \App\Models\AuditLog::create([
+                'user_id' => $user->id,
+                'action' => 'system.cache_clear',
+                'description' => 'System Admin cleared application cache',
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'tenant_id' => null // System level action
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'System cache cleared successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Failed to clear cache: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get system logs (System Admin Only)
+     */
+    public function getLogs(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user || !$user->hasRole('System Admin')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $lines = $request->input('lines', 100);
+        $logPath = storage_path('logs/laravel.log');
+
+        if (!file_exists($logPath)) {
+            return response()->json(['success' => true, 'data' => []]);
+        }
+
+        try {
+            $content = file($logPath);
+            $logLines = [];
+            
+            if ($content) {
+                $totalLines = count($content);
+                $start = max(0, $totalLines - $lines);
+                
+                for ($i = $start; $i < $totalLines; $i++) {
+                    $logLines[] = $content[$i];
+                }
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => array_reverse($logLines) // Newest first
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Error reading logs'], 500);
+        }
+    }
+
+    /**
+     * Get maintenance mode status
+     */
+    public function getMaintenanceMode(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user || !$user->hasRole('System Admin')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'enabled' => app()->isDownForMaintenance()
+            ]
+        ]);
+    }
+
+    /**
+     * Toggle maintenance mode
+     */
+    public function toggleMaintenanceMode(Request $request)
+    {
+        $user = auth()->user();
+        if (!$user || !$user->hasRole('System Admin')) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $enable = $request->input('enable', false);
+        $secret = $request->input('secret', null);
+
+        try {
+            if ($enable) {
+                $command = 'down';
+                if ($secret) {
+                    $command .= " --secret=\"$secret\"";
+                }
+                Artisan::call($command);
+                $action = 'enabled';
+            } else {
+                Artisan::call('up');
+                $action = 'disabled';
+            }
+
+            \App\Models\AuditLog::create([
+                'user_id' => $user->id,
+                'action' => 'system.maintenance_' . $action,
+                'description' => "System Admin {$action} maintenance mode",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'tenant_id' => null
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => "Maintenance mode {$action} successfully"
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Failed to toggle maintenance mode'], 500);
+        }
+    }
+
+    /**
+     * Impersonate user (Remote Access) - System Admin Only
+     */
+    public function impersonate(Request $request, $userId)
+    {
+        $admin = auth()->user();
+        
+        // 1. Strict Role Check
+        if (!$admin || !$admin->hasRole('System Admin')) {
+            Log::warning("Unauthorized impersonation attempt by User ID: {$admin->id}");
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], 403);
+        }
+
+        $targetUser = User::find($userId);
+        if (!$targetUser) {
+            return response()->json(['success' => false, 'message' => 'User not found'], 404);
+        }
+
+        // 2. Prevent Escalation (System Admin cannot impersonate another System Admin)
+        if ($targetUser->hasRole('System Admin')) {
+            return response()->json(['success' => false, 'message' => 'Cannot impersonate another System Admin'], 403);
+        }
+
+        try {
+            // 3. Generate short-lived token
+            $token = $targetUser->createToken('impersonation_token by ' . $admin->name)->plainTextToken;
+
+            // 4. Audit Log
+            \App\Models\AuditLog::create([
+                'user_id' => $admin->id,
+                'action' => 'user.impersonate',
+                'description' => "System Admin impersonated user: {$targetUser->name} (ID: {$targetUser->id})",
+                'ip_address' => $request->ip(),
+                'user_agent' => $request->userAgent(),
+                'tenant_id' => $targetUser->tenant_id // Log against target tenant context if applicable
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Impersonation successful',
+                'data' => [
+                    'token' => $token,
+                    'user' => $targetUser
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['success' => false, 'message' => 'Impersonation failed: ' . $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Get system information
      */
     public function getSystemInfo()

@@ -182,9 +182,9 @@ class StockController extends Controller
             'outlet_id' => 'required|exists:outlets,id',
             'items' => 'required|array|min:1',
             'items.*.product_id' => 'required|exists:products,id',
-            'items.*.system_stock' => 'required|integer|min:0',
-            'items.*.physical_stock' => 'required|integer|min:0',
-            'items.*.difference' => 'required|integer',
+            'items.*.system_stock' => 'required|numeric|min:0',
+            'items.*.physical_stock' => 'required|numeric|min:0',
+            'items.*.difference' => 'required|numeric',
             'items.*.notes' => 'nullable|string',
         ]);
 

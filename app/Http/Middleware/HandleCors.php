@@ -14,19 +14,38 @@ class HandleCors
         $clientType = $request->header('X-Client-Type');
         $isProduction = app()->environment('production');
 
+        // Allow same-origin requests (Admin Panel)
+        $host = $request->getSchemeAndHttpHost();
+        if ($origin === $host || empty($origin)) {
+            if ($request->is('admin*') || $request->is('login')) {
+                return $next($request);
+            }
+        }
+
         // Allowed origins for web clients
         $allowedWebOrigins = [
             'https://kasir-pos.sunnflower.site',
+            'https://luma-pos.sunnflower.site',
         ];
 
         // Add development origins only in non-production
         if (!$isProduction) {
             $allowedWebOrigins = array_merge($allowedWebOrigins, [
+                'http://localhost:4174',
                 'http://localhost:4173',
                 'http://127.0.0.1:4173',
                 'http://localhost:8081',
                 'http://127.0.0.1:8081',
+                'http://localhost:5174',
+                'http://localhost:5173',
+                config('app.url'),
+                'http://kasir-pos-system.test',
             ]);
+        }
+        
+        // Also allow APP_URL in production if needed, or handle same-origin logic
+        if ($isProduction) {
+             $allowedWebOrigins[] = config('app.url');
         }
 
         // Check client types
@@ -153,7 +172,19 @@ class HandleCors
         }
 
         // Handle actual request - only if allowed
-        $response = $next($request);
+        try {
+            $response = $next($request);
+        } catch (\Throwable $e) {
+            // Catch any API exceptions so we can still add CORS headers
+            if ($request->is('api/*') || $request->expectsJson()) {
+                $response = \App\Exceptions\ApiExceptionHandler::handle($e, $request);
+                if (!$response) {
+                    throw $e;
+                }
+            } else {
+                throw $e;
+            }
+        }
 
         // Set CORS headers for allowed requests
         // CRITICAL: Always set headers if web origin is in whitelist

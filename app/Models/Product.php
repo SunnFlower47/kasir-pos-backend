@@ -11,9 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Product extends Model
 {
-    use HasFactory, Auditable;
+    use HasFactory, Auditable, \App\Traits\TenantScoped;
 
     protected $fillable = [
+        'tenant_id',
         'name',
         'sku',
         'barcode',
@@ -28,6 +29,8 @@ class Product extends Model
         'is_active',
     ];
 
+    protected $appends = ['image_url'];
+
     protected function casts(): array
     {
         return [
@@ -37,6 +40,19 @@ class Product extends Model
             'min_stock' => 'decimal:3',
             'is_active' => 'boolean',
         ];
+    }
+
+    public function getImageUrlAttribute(): ?string
+    {
+        if (!$this->image) {
+            return null;
+        }
+        
+        if (filter_var($this->image, FILTER_VALIDATE_URL)) {
+            return $this->image;
+        }
+
+        return url('storage/' . $this->image);
     }
 
     /**
@@ -118,5 +134,13 @@ class Product extends Model
     public function isLowStock(int $outletId): bool
     {
         return $this->getStockQuantity($outletId) <= $this->min_stock;
+    }
+
+    /**
+     * Get the additional units for the product.
+     */
+    public function productUnits(): HasMany
+    {
+        return $this->hasMany(ProductUnit::class);
     }
 }
