@@ -31,6 +31,15 @@ class OtpController extends Controller
         $email = $request->email;
         $type = $request->type ?? 'register'; // Default to register if not specified
 
+        // Validation for Registration: Ensure email is unique
+        if ($type === 'register' && \App\Models\User::where('email', $email)->exists()) {
+             return response()->json([
+                'success' => false, // Or standard Laravel generic error structure
+                'message' => 'The email has already been taken.',
+                'errors' => ['email' => ['The email has already been taken.']]
+            ], 422);
+        }
+
         try {
             // Generate (Hash & Store)
             $code = $this->otpService->generate($email, $type);
