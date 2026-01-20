@@ -26,6 +26,7 @@ class HandleCors
         $allowedWebOrigins = [
             'https://kasir-pos.sunnflower.site',
             'https://luma-pos.sunnflower.site',
+            'https://lumapos-web.sunnflower.site',
         ];
 
         // Add development origins only in non-production
