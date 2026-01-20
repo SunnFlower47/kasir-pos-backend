@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Log;
 
+class OtpController extends Controller
+{
     protected $otpService;
 
     public function __construct(\App\Services\Auth\OtpService $otpService)
