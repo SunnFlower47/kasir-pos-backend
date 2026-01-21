@@ -112,6 +112,18 @@ class UserController extends Controller
 
         // Assign role
         if ($request->role) {
+            // Security Check: Tenants cannot assign System roles
+            $authUser = Auth::user(); // Redundant reuse but safe
+            if ($authUser->tenant_id) {
+                $targetRole = Role::where('name', $request->role)->first();
+                if ($targetRole && $targetRole->scope !== 'tenant') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized: You cannot assign this restricted role.'
+                    ], 403);
+                }
+            }
+
             $newUser->assignRole($request->role);
         }
 
@@ -190,6 +202,17 @@ class UserController extends Controller
 
         // Update role
         if ($request->role) {
+            // Security Check: Tenants cannot assign System roles
+            if ($authUser->tenant_id) {
+                $targetRole = Role::where('name', $request->role)->first();
+                if ($targetRole && $targetRole->scope !== 'tenant') {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Unauthorized: You cannot assign this restricted role.'
+                    ], 403);
+                }
+            }
+
             $user->syncRoles([$request->role]);
         }
 
