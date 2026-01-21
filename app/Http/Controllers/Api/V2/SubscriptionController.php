@@ -105,12 +105,27 @@ class SubscriptionController extends Controller
     public function plans()
     {
         $plans = \App\Models\SubscriptionPlan::where('is_active', true)->get()->map(function($plan) {
+            $features = $plan->features;
+            
+            // Robust handling for features: Ensure it's always an array
+            if (is_string($features)) {
+                $decoded = json_decode($features, true);
+                if (is_array($decoded)) {
+                    $features = $decoded;
+                }
+            }
+            
+            // Fallback if null or invalid
+            if (!is_array($features)) {
+                $features = ['web', 'mobile', 'desktop'];
+            }
+
             return [
                 'id' => $plan->slug,
                 'name' => $plan->name,
                 'price' => (float)$plan->price,
                 'period' => $plan->slug, // Using slug as period identifier for now
-                'features' => $plan->features ?? ['web', 'mobile', 'desktop'],
+                'features' => $features,
                 'description' => $plan->description
             ];
         });
