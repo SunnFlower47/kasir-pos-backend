@@ -64,6 +64,11 @@ return Application::configure(basePath: dirname(__DIR__))
             'api/v2/midtrans/callback',
             'api/midtrans/callback'
         ]);
+
+        // Prevent Maintenance Mode from blocking Admin Panel
+        $middleware->preventRequestsDuringMaintenance(except: [
+            'admin/*',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle API routes - return JSON responses
