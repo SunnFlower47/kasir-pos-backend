@@ -105,19 +105,43 @@ class SubscriptionController extends Controller
     public function plans()
     {
         $plans = \App\Models\SubscriptionPlan::where('is_active', true)->get()->map(function($plan) {
-            $features = $plan->features;
+            $rawFeatures = $plan->features;
             
-            // Robust handling for features: Ensure it's always an array
-            if (is_string($features)) {
-                $decoded = json_decode($features, true);
+            // Default Values
+            $displayFeatures = ['web', 'mobile', 'desktop']; // Fallback if totally empty, but better to be marketing text
+            $platforms = ['web', 'mobile', 'desktop'];
+            $popular = false;
+            $cta = 'Pilih ' . $plan->name;
+
+            // Robust handling for features: Ensure it's decoded
+            if (is_string($rawFeatures)) {
+                $decoded = json_decode($rawFeatures, true);
                 if (is_array($decoded)) {
-                    $features = $decoded;
+                    $rawFeatures = $decoded;
                 }
             }
             
-            // Fallback if null or invalid
-            if (!is_array($features)) {
-                $features = ['web', 'mobile', 'desktop'];
+            if (is_array($rawFeatures)) {
+                // Check if it's the NEW structure (has 'display_features' key)
+                if (isset($rawFeatures['display_features'])) {
+                    $displayFeatures = $rawFeatures['display_features'];
+                    $platforms = $rawFeatures['platforms'] ?? ['web', 'mobile', 'desktop'];
+                    $popular = $rawFeatures['is_popular'] ?? false;
+                    $cta = $rawFeatures['cta_text'] ?? ('Pilih ' . $plan->name);
+                } 
+                // Check if it's the OLD structure (simple array of limits or strings)
+                // If keys are 'max_users' etc, it's limits. If integer indexed, it might be strings.
+                else if (isset($rawFeatures['max_users']) || isset($rawFeatures['limits'])) {
+                     // It's just limits, so we don't have display features. 
+                     // Provide generic features based on limits? Or just empty.
+                     $displayFeatures = [];
+                     if (isset($rawFeatures['max_users']) && $rawFeatures['max_users'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_users']} Users";
+                     if (isset($rawFeatures['max_outlets']) && $rawFeatures['max_outlets'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_outlets']} Outlets";
+                }
+                else {
+                    // It might be a simple array of strings (old legacy data if any)
+                    $displayFeatures = $rawFeatures; 
+                }
             }
 
             return [
@@ -125,7 +149,10 @@ class SubscriptionController extends Controller
                 'name' => $plan->name,
                 'price' => (float)$plan->price,
                 'period' => $plan->slug, // Using slug as period identifier for now
-                'features' => $features,
+                'features' => $displayFeatures,
+                'platforms' => $platforms,
+                'popular' => $popular,
+                'cta' => $cta,
                 'description' => $plan->description
             ];
         });

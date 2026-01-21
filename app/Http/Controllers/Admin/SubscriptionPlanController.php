@@ -31,17 +31,27 @@ class SubscriptionPlanController extends Controller
             'max_users' => 'nullable|integer',
             'max_outlets' => 'nullable|integer',
             'max_products' => 'nullable|integer',
+            // Display & Marketing
+            'display_features' => 'nullable|array',
+            'platforms' => 'nullable|array',
+            'main_cta' => 'nullable|string',
         ]);
 
-        // Pack features
+        // Pack features into structured JSON
         $features = [
-            'max_users' => $request->max_users ?? 0, // 0 usually means unlimited/or specific logic, let's treat null as unlimited if we want, but user wants limit. Let's say 0 is none? Or use null for unlimited. Let's use user input directly.
-            'max_outlets' => $request->max_outlets ?? 1,
-            'max_products' => $request->max_products ?? 1000,
+            'limits' => [
+                'max_users' => $request->max_users ?? 0,
+                'max_outlets' => $request->max_outlets ?? 1,
+                'max_products' => $request->max_products ?? 1000,
+            ],
+            'display_features' => array_values(array_filter($request->display_features ?? [], function($value) { return !is_null($value) && $value !== ''; })),
+            'platforms' => $request->platforms ?? [],
+            'is_popular' => $request->has('is_popular'),
+            'cta_text' => $request->cta_text ?? 'Choose Plan',
         ];
         
         $data = $request->only(['name', 'slug', 'price', 'duration_in_days', 'description']);
-        $data['features'] = $features;
+        $data['features'] = $features; // Eloquent casts this to JSON automatically
 
         SubscriptionPlan::create($data);
 
@@ -66,13 +76,24 @@ class SubscriptionPlanController extends Controller
             'max_users' => 'nullable|integer',
             'max_outlets' => 'nullable|integer',
             'max_products' => 'nullable|integer',
+             // Display & Marketing
+            'display_features' => 'nullable|array',
+            'platforms' => 'nullable|array',
+            'main_cta' => 'nullable|string',
         ]);
 
         // Pack features
+        // Merge with existing if needed, but here we rebuild the structure
         $features = [
-            'max_users' => $request->max_users ?? $plan->features['max_users'] ?? 0,
-            'max_outlets' => $request->max_outlets ?? $plan->features['max_outlets'] ?? 1,
-            'max_products' => $request->max_products ?? $plan->features['max_products'] ?? 1000,
+            'limits' => [
+                'max_users' => $request->max_users ?? ($plan->features['limits']['max_users'] ?? 0),
+                'max_outlets' => $request->max_outlets ?? ($plan->features['limits']['max_outlets'] ?? 1),
+                'max_products' => $request->max_products ?? ($plan->features['limits']['max_products'] ?? 1000),
+            ],
+            'display_features' => array_values(array_filter($request->display_features ?? [], function($value) { return !is_null($value) && $value !== ''; })),
+            'platforms' => $request->platforms ?? [],
+            'is_popular' => $request->has('is_popular'),
+            'cta_text' => $request->cta_text ?? 'Choose Plan',
         ];
 
         $data = $request->only(['name', 'slug', 'price', 'duration_in_days', 'description', 'is_active']);
