@@ -22,6 +22,7 @@ class AuditLog extends Model
         'user_id',
         'ip_address',
         'user_agent',
+        'client_platform',
         'tenant_id',
     ];
 

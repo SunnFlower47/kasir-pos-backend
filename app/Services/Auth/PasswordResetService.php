@@ -90,6 +90,30 @@ class PasswordResetService
         if ($user) {
             $user->password = Hash::make($newPassword);
             $user->save();
+
+            // SECURITY: Revoke all existing tokens to force re-login on all devices
+            $user->tokens()->delete();
+
+            // Audit Log: Password Reset
+            try {
+                $userAgent = request()->userAgent();
+                $platform = stripos($userAgent, 'Mobile') !== false ? 'mobile' : 'web';
+                
+                \App\Models\AuditLog::create([
+                    'model_type' => User::class,
+                    'model_id' => $user->id,
+                    'event' => 'auth.password_reset',
+                    'user_id' => $user->id,
+                    'ip_address' => request()->ip(),
+                    'user_agent' => $userAgent,
+                    'client_platform' => $platform,
+                    'tenant_id' => $user->tenant_id,
+                    'new_values' => ['reset_at' => now()]
+                ]);
+            } catch (\Exception $e) {
+                // Ignore audit log failure to not block reset flow
+                \Illuminate\Support\Facades\Log::error('Audit Log Failed on Reset: ' . $e->getMessage());
+            }
         }
 
         // 4. Invalidate Token

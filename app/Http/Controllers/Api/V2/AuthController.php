@@ -120,6 +120,23 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
+        // Audit Log: Login
+        $userAgent = $request->userAgent();
+        $platform = stripos($userAgent, 'Mobile') !== false ? 'mobile' : 'web'; // Simple detection
+        if (stripos($userAgent, 'Postman') !== false) $platform = 'api_tool';
+
+        \App\Models\AuditLog::create([
+            'model_type' => User::class,
+            'model_id' => $user->id,
+            'event' => 'auth.login',
+            'user_id' => $user->id,
+            'ip_address' => $request->ip(),
+            'user_agent' => $userAgent,
+            'client_platform' => $platform,
+            'tenant_id' => $user->tenant_id,
+            'new_values' => ['login_at' => now()]
+        ]);
+
         return response()->json([
             'success' => true,
             'message' => 'Login successful',

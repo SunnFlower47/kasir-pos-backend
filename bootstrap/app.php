@@ -25,6 +25,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'electron.origin' => \App\Http\Middleware\AllowElectronOrigin::class,
             'cors' => \App\Http\Middleware\HandleCors::class,
             'tenant.suspended' => \App\Http\Middleware\CheckTenantSuspended::class,
+            'recaptcha' => \App\Http\Middleware\ValidateRecaptcha::class,
         ]);
 
         // CORS FIRST - handle OPTIONS before anything else

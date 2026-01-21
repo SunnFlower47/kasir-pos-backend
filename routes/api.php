@@ -18,15 +18,24 @@ use Illuminate\Support\Facades\Route;
 // Public routes
 Route::prefix('v2')->group(function () {
     // V2 Authentication
-    Route::post('/otp/send', [\App\Http\Controllers\Api\V2\OtpController::class, 'send']);
-    Route::post('/otp/verify', [\App\Http\Controllers\Api\V2\OtpController::class, 'verify']);
-    Route::post('/register', [\App\Http\Controllers\Api\V2\AuthController::class, 'register']);
+    Route::post('/otp/send', [\App\Http\Controllers\Api\V2\OtpController::class, 'send'])
+        ->middleware('throttle:5,10'); // 5 OTPs per 10 mins
+        
+    Route::post('/otp/verify', [\App\Http\Controllers\Api\V2\OtpController::class, 'verify'])
+        ->middleware('throttle:5,10');
+
+    Route::post('/register', [\App\Http\Controllers\Api\V2\AuthController::class, 'register'])
+        ->middleware(['throttle:5,1', 'recaptcha:v3']);
+
     Route::post('/login', [\App\Http\Controllers\Api\V2\AuthController::class, 'login'])
-        ->middleware('throttle:10,1');
+        ->middleware(['throttle:5,1', 'recaptcha:v3']);
     
     // Password Reset
-    Route::post('/auth/forgot-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'forgotPassword']);
-    Route::post('/auth/reset-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'resetPassword']);
+    Route::post('/auth/forgot-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'forgotPassword'])
+        ->middleware(['throttle:3,10', 'recaptcha:v2']); // 3 requests per 10 mins
+
+    Route::post('/auth/reset-password', [\App\Http\Controllers\Api\V2\AuthController::class, 'resetPassword'])
+        ->middleware('throttle:3,10');
     
     // Public Midtrans Callback (Webhook)
     Route::post('/midtrans/callback', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'callback']);
