@@ -11,8 +11,7 @@ class Role extends SpatieRole
     protected $fillable = [
         'name',
         'guard_name',
-        'tenant_id',
-        'scope',
+        'scope', // system, tenant
         'description',
         'updated_at',
         'created_at',
@@ -25,31 +24,9 @@ class Role extends SpatieRole
     {
         parent::boot();
 
-        // Scope: Tenant Isolation
-        static::addGlobalScope('tenant', function (Builder $builder) {
-            if (Auth::check()) {
-                $user = Auth::user();
-                
-                if ($user->hasRole('System Admin')) {
-
-                } elseif ($user->tenant_id) {
-                    // Strict Isolation: Tenants only see their own roles.
-                    // Global templates are cloned at registration, so no need to show them here.
-                    $builder->where('tenant_id', $user->tenant_id);
-                }
-            }
-        });
-
-        // Auto-assign tenant_id on creation
-        static::creating(function ($role) {
-            if (Auth::check()) {
-               $user = Auth::user();
-               if ($user->tenant_id && !$role->tenant_id) {
-                   $role->tenant_id = $user->tenant_id;
-               }
-            }
-        });
-
+        // NOTE: Tenant isolation is REMOVED for Roles.
+        // Roles are now GLOBAL templates available to all tenants.
+        
         // CACHE INVALIDATION: Force clear Spatie cache on any Role change
         $flushCache = function ($role) {
             app(\Spatie\Permission\PermissionRegistrar::class)->forgetCachedPermissions();

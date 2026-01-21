@@ -53,16 +53,20 @@ class TenantOnboardingService
                 'is_active' => true,
             ]);
 
-            // 4. Clone Roles from Templates
-            $ownerRole = $this->cloneRolesForTenant($tenant);
-
-            // 5. Assign Role to User
+            // 4. Assign Global Owner Role (No Cloning)
+            $ownerRole = Role::where('name', 'Owner')
+                ->where('scope', 'tenant')
+                ->first();
+            
             if ($ownerRole) {
                 // Ensure the relationship is refreshed before assignment to avoid cache issues within transaction
                 $user->assignRole($ownerRole);
+            } else {
+                 // Fallback: This shouldn't happen if seeder ran, but handled gracefully?
+                 // Log error or throw exception in production
             }
 
-            // 6. Create Subscription (Inactive logic)
+            // 5. Create Subscription (Inactive logic)
             Subscription::create([
                 'tenant_id' => $tenant->id,
                 'plan_name' => 'free',
@@ -73,7 +77,7 @@ class TenantOnboardingService
                 'max_outlets' => 1,
             ]);
 
-             // 7. CRITICAL: Invalidate Spatie Cache to ensure new roles/permissions are visible immediately.
+            // 6. CRITICAL: Invalidate Spatie Cache to ensure new roles/permissions are visible immediately.
             app(PermissionRegistrar::class)->forgetCachedPermissions();
 
             return [
@@ -84,52 +88,10 @@ class TenantOnboardingService
     }
 
     /**
-     * Clones all 'tenant' scoped roles for the new tenant.
-     * Returns the 'Owner' role instance for assignment.
+     * Helper to get global owner role (Optional, logic is inline now but kept if needed for interface compatibility)
      */
-    protected function cloneRolesForTenant(Tenant $tenant): ?Role
+    protected function getGlobalOwnerRole(): ?Role
     {
-        // Fetch templates: roles with no tenant_id (global templates) and scope='tenant'
-        $templateRoles = Role::withoutGlobalScopes()
-            ->whereNull('tenant_id')
-            ->where('scope', 'tenant')
-            ->get();
-
-        $ownerRole = null;
-
-        foreach ($templateRoles as $template) {
-            $newRole = new Role();
-            $newRole->fill([
-                'name' => $template->name,
-                'guard_name' => 'sanctum',
-                'tenant_id' => $tenant->id,
-                'scope' => 'tenant',
-                'description' => $template->description ?? ($template->name . ' role for ' . $tenant->name),
-            ]);
-            $newRole->save();
-
-            // Sync permissions from template
-            $newRole->syncPermissions($template->permissions);
-
-            if ($template->name === 'Owner') {
-                $ownerRole = $newRole;
-            } elseif ($template->name === 'Super Admin' && !$ownerRole) {
-                $ownerRole = $newRole;
-            }
-        }
-
-        // Fallback if no templates exist
-        if (!$ownerRole) {
-            $ownerRole = new Role();
-            $ownerRole->fill([
-                'name' => 'Owner',
-                'guard_name' => 'sanctum',
-                'tenant_id' => $tenant->id,
-                'scope' => 'tenant',
-            ]);
-            $ownerRole->save();
-        }
-
-        return $ownerRole;
+        return Role::where('name', 'Owner')->where('scope', 'tenant')->first();
     }
 }

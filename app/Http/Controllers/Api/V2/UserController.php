@@ -248,7 +248,6 @@ class UserController extends Controller
     public function getRoles(): JsonResponse
     {
         /** @var User $user */
-
         $user = Auth::user();
         if (!$user || !$user->can('users.view')) {
             return response()->json([
@@ -257,7 +256,21 @@ class UserController extends Controller
             ], 403);
         }
 
-        $roles = Role::with('permissions')->get();
+        // Global Roles Logic:
+        // Tenant users can only see 'tenant' scoped roles.
+        // System users (no tenant_id) can see 'system' scoped roles (and maybe tenant ones too).
+        
+        $query = Role::query()->with('permissions');
+        
+        if ($user->tenant_id) {
+            $query->where('scope', 'tenant')
+                  ->whereNotIn('name', ['System Admin', 'System Support']); // Extra safety
+        } else {
+            // System Admin can see everything, or filter if needed
+            // $query->where('scope', 'system'); 
+        }
+
+        $roles = $query->get();
 
         return response()->json([
             'success' => true,
@@ -325,8 +338,17 @@ class UserController extends Controller
         /** @var User $user */
 
         $user = Auth::user();
-        if (!$user || !$user->can('users.edit')) {
+        
+        // Strict Check: Only System Admins (no tenant_id) can edit Global Roles
+        if ($user->tenant_id) {
             return response()->json([
+                'success' => false,
+                'message' => 'Unauthorized: Tenants cannot modify Global Role Templates.'
+            ], 403);
+        }
+
+        if (!$user || !$user->can('roles.edit')) { // Changed from users.edit to roles.edit for specificity
+             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized'
             ], 403);
