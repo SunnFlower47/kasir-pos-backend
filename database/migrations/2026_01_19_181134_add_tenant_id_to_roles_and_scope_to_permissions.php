@@ -12,10 +12,13 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('roles', function (Blueprint $table) {
+            // Disabled adding tenant_id as we reverted to global templates
+            /*
             if (!Schema::hasColumn('roles', 'tenant_id')) {
                 $table->unsignedBigInteger('tenant_id')->nullable()->after('guard_name')->index();
                 $table->foreign('tenant_id')->references('id')->on('tenants')->onDelete('cascade');
             }
+            */
             
             if (!Schema::hasColumn('roles', 'description')) {
                 $table->text('description')->nullable()->after('guard_name');
@@ -25,6 +28,8 @@ return new class extends Migration
                 $table->string('scope')->default('tenant')->after('guard_name')->comment('system, tenant');
             }
 
+            // Disabled changing unique constraints
+            /*
             try {
                 $table->dropUnique(['name', 'guard_name']);
             } catch (\Exception $e) {
@@ -36,6 +41,7 @@ return new class extends Migration
             } catch (\Exception $e) {
                 // Ignore if already exists
             }
+            */
         });
 
         Schema::table('permissions', function (Blueprint $table) {

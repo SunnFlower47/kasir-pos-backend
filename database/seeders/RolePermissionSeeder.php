@@ -132,9 +132,13 @@ class RolePermissionSeeder extends Seeder
             'users.view', 'tenants.view', 'tenants.manage', 'transactions.view', 'reports.view', 'audit-logs.view'
         ])->get());
 
-        // TENANT PERMISSIONS (Exclude system-only perms)
+        // TENANT PERMISSIONS (Exclude system-only perms + Global Role Management)
         $tenantPermissionsKey = Permission::where('guard_name', 'sanctum')
-            ->whereNotIn('name', ['tenants.view', 'tenants.manage', 'system.manage'])
+            ->whereNotIn('name', [
+                'tenants.view', 'tenants.manage', 'system.manage',
+                'roles.create', 'roles.edit', 'roles.delete',
+                'permissions.manage'
+            ])
             ->get();
 
         // Owner: Full Tenant Access

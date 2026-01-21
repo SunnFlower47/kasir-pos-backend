@@ -12,7 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('audit_logs', function (Blueprint $table) {
-            $table->string('client_platform')->nullable()->after('user_agent');
+            if (!Schema::hasColumn('audit_logs', 'client_platform')) {
+                $table->string('client_platform')->nullable()->after('user_agent');
+            }
         });
     }
 
