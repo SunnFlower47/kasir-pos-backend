@@ -43,7 +43,7 @@ class UserController extends Controller
         }
 
         $users = $query->paginate(15);
-        $roles = Role::whereNull('tenant_id')->pluck('name'); // Filter options
+        $roles = Role::pluck('name'); // Filter options
 
         return view('admin.users.index', compact('users', 'roles'));
     }
@@ -57,7 +57,7 @@ class UserController extends Controller
         // For Tenant users, we should be careful. Maybe only specific fields?
         // But System Admin implies Root access, so generally full edit is allowed but warned.
         
-        $roles = Role::whereNull('tenant_id')->get(); // Global roles
+        $roles = Role::all(); // Global roles
         
         // If editing a tenant user, maybe show explanation that they are managed by tenant?
         // But for support reasons, we allow editing.

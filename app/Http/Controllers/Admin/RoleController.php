@@ -17,10 +17,10 @@ class RoleController extends Controller
      */
     public function index()
     {
-        // Show all Global Roles (no tenant_id)
-        // We might also want to show Tenant Templates if they are stored as global roles with scope='tenant'
-        $roles = Role::whereNull('tenant_id')
-                    ->orderBy('scope')
+        // Show all Global Roles
+        // Roles table no longer has tenant_id, all roles are global
+        $roles = Role::orderBy('scope')
+                    ->orderBy('name')
                     ->orderBy('name')
                     ->paginate(10);
                     
