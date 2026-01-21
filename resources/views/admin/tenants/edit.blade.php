@@ -65,9 +65,9 @@
                          <div class="col-span-6">
                             <div class="flex items-start">
                                 <div class="flex items-center h-5">
-                                    <input id="is_active" name="is_active" type="checkbox" value="1" {{ old('is_active', $tenant->is_active) ? 'checked' : '' }} class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
                                     <!-- Hidden input to handle unchecked state -->
                                     <input type="hidden" name="is_active" value="0">
+                                    <input id="is_active" name="is_active" type="checkbox" value="1" {{ old('is_active', $tenant->is_active) ? 'checked' : '' }} class="focus:ring-indigo-500 h-4 w-4 text-indigo-600 border-gray-300 rounded">
                                 </div>
                                 <div class="ml-3 text-sm">
                                     <label for="is_active" class="font-medium text-gray-700">Active Tenant</label>
