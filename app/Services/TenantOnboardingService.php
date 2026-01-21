@@ -28,6 +28,7 @@ class TenantOnboardingService
                 'email' => $data['email'],
                 'phone' => $data['phone'] ?? null,
                 'address' => $data['address'] ?? null,
+                'business_type' => $data['business_type'] ?? null,
                 'owner_name' => $data['name'],
                 'is_active' => true,
             ]);
