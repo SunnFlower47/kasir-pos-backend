@@ -185,6 +185,7 @@ class RolePermissionSeeder extends Seeder
             'units.view',
         ])->get());
         
+        
         // 4. Seeding Demo Tenant is optional here as it might conflict with fresh refactor,
         // but let's keep it simple or remove creating users which might fail due to role changes.
         // I will skip creating demo users in this refactored seeder to rely on fresh registration or manual seed.

@@ -23,7 +23,7 @@ class DatabaseSeeder extends Seeder
             // DemoDataSeeder::class,         // Core products, stocks, customers
             // TransactionSeeder::class,      // Sample transactions for reports
             SubscriptionPlanSeeder::class, // Subscription plans
-            // SystemAdminSeeder::class,
+            SystemAdminSeeder::class,
         ]);
 
         // Ensure a fallback admin user exists for legacy tests

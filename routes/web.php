@@ -36,6 +36,12 @@ Route::prefix('admin')->name('admin.')->group(function () {
             'system-admins' => 'user' // Bind route param 'system_admin' to 'user' model
         ]);
 
+        // Global User Management (All Users)
+        Route::resource('users', \App\Http\Controllers\Admin\UserController::class);
+
+        // Global Role Management
+        Route::resource('roles', \App\Http\Controllers\Admin\RoleController::class);
+
         // Audit Logs (Database)
         Route::resource('audit-logs', \App\Http\Controllers\Admin\AuditLogController::class)->only(['index']);
 
