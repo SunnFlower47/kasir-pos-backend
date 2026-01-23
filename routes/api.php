@@ -59,7 +59,9 @@ Route::prefix('v2')->group(function () {
     Route::get('/subscription/plans', [\App\Http\Controllers\Api\V2\SubscriptionController::class, 'plans']);
 
     // --- MIGRATED V2 POS ROUTES ---
-    Route::get('purchases/{purchase}/print', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'print']);
+    Route::get('purchases/{purchase}/print', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'print'])
+        ->name('purchases.print')
+        ->middleware('signed');
 
     Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/logout', [\App\Http\Controllers\Api\V2\AuthController::class, 'logout']);
@@ -125,6 +127,7 @@ Route::prefix('v2')->group(function () {
         Route::apiResource('suppliers', \App\Http\Controllers\Api\V2\SupplierController::class);
 
         // Purchases
+        Route::get('purchases/{purchase}/print-url', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'getPrintUrl']);
         Route::apiResource('purchases', \App\Http\Controllers\Api\V2\PurchaseController::class);
         Route::patch('purchases/{purchase}/status', [\App\Http\Controllers\Api\V2\PurchaseController::class, 'updateStatus']);
 

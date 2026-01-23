@@ -327,18 +327,33 @@ class PurchaseController extends Controller
     }
 
     /**
-     * Print Purchase Invoice (Public)
+     * Get Signed URL for printing (Protected)
+     */
+    public function getPrintUrl(Purchase $purchase)
+    {
+        // 5 minute expiration for the link
+        $url = \Illuminate\Support\Facades\URL::signedRoute(
+            'purchases.print', 
+            ['purchase' => $purchase->id],
+            now()->addMinutes(5)
+        );
+
+        return response()->json([
+            'success' => true,
+            'url' => $url
+        ]);
+    }
+
+    /**
+     * Print Purchase Invoice (Public - Signed)
      * 
      * @param Purchase $purchase
      * @return \Illuminate\Http\Response
      */
     public function print(Purchase $purchase)
     {
-        // IMPORTANT: In production, verify user can access this purchase via tenant_id or other means
-        // Since this is a public route (often opened in new tab), we rely on UUID or obscure ID if possible.
-        // For now, standard ID binding.
+        // This route should be protected by 'signed' middleware in api.php
         
-        // Eager load relationships
         // Eager load relationships
         $purchase->load(['supplier', 'purchaseItems.product', 'purchaseItems.unit', 'user', 'outlet']);
 
