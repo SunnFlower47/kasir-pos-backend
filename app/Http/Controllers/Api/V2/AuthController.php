@@ -110,12 +110,13 @@ class AuthController extends Controller
             ], 403);
         }
 
+        // Check Subscription
         // Check Subscription (Optional - Don't block login, just return status)
         // We allow login even if expired so they can renew via Dashboard.
         // Frontend will handle the restriction to POS features.
         
         // if ($user->tenant) {
-        //     $subscription = $user->tenant->activeSubscription;
+        //     $subscription = $user->tenant->latestSubscription;
         //     ...
         // }
 

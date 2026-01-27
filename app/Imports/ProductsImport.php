@@ -28,6 +28,7 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
     protected $previewData = [];
     protected $validRows = [];
     protected $invalidRows = [];
+    protected $skuSequence = null;
 
     public function __construct($user = null)
     {
@@ -116,8 +117,13 @@ class ProductsImport implements ToModel, WithHeadingRow, WithValidation, WithBat
             );
 
             // Generate SKU if not provided
+            // Generate SKU if not provided
             if (empty($sku)) {
-                $sku = 'PRD' . str_pad(Product::count() + 1, 6, '0', STR_PAD_LEFT);
+                if ($this->skuSequence === null) {
+                    $this->skuSequence = Product::count();
+                }
+                $this->skuSequence++;
+                $sku = 'PRD' . str_pad($this->skuSequence, 6, '0', STR_PAD_LEFT);
             }
 
             // Check for duplicate SKU (scoped by tenant if applicable, but usually simple check here)

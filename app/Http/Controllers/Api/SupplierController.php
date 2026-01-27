@@ -30,11 +30,22 @@ class SupplierController extends Controller
         }
 
         $perPage = $request->get('per_page', 15);
-        $suppliers = $query->orderBy('name')->paginate($perPage);
+        
+        // Use a clone for pagination so original query isn't mutated with limit/offset
+        $suppliers = (clone $query)->orderBy('name')->paginate($perPage);
+
+        // Calculate stats (respecting search filters but ignoring pagination)
+        $stats = [
+            'active' => (clone $query)->where('is_active', true)->count(),
+            'inactive' => (clone $query)->where('is_active', false)->count(),
+        ];
 
         return response()->json([
             'success' => true,
-            'data' => $suppliers
+            'data' => [
+                'suppliers' => $suppliers,
+                'stats' => $stats
+            ]
         ]);
     }
 
