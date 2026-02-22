@@ -22,7 +22,7 @@ Route::prefix('admin')->name('admin.')->group(function () {
         Route::patch('tenants/{tenant}/resume', [\App\Http\Controllers\Admin\TenantController::class, 'resume'])->name('tenants.resume');
         Route::get('tenants/{tenant}/extend', [\App\Http\Controllers\Admin\TenantController::class, 'extend'])->name('tenants.extend');
         Route::post('tenants/{tenant}/extend', [\App\Http\Controllers\Admin\TenantController::class, 'processExtend'])->name('tenants.process_extend');
-        Route::get('tenants/{tenant}/impersonate', [\App\Http\Controllers\Admin\TenantController::class, 'impersonate'])->name('tenants.impersonate');
+        Route::post('tenants/{tenant}/impersonate', [\App\Http\Controllers\Admin\TenantController::class, 'impersonate'])->name('tenants.impersonate');
         Route::resource('tenants', \App\Http\Controllers\Admin\TenantController::class);
         
         // Plans

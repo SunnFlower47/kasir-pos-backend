@@ -153,19 +153,17 @@ class TenantController extends Controller
             abort(403, 'Security Alert: Cannot impersonate another System Admin.');
         }
 
-        // 3. Create a short-lived token (30 mins)
-        // Note: Sanctum personal_access_tokens table has 'expires_at' column if configured.
-        // We set explicitly here.
-        $token = $user->createToken('impersonate_token', ['*'], now()->addMinutes(30))->plainTextToken;
+        // 3. Create a short-lived token (30 mins) with scoped ability
+        $token = $user->createToken('impersonate_token', ['impersonate'], now()->addMinutes(30))->plainTextToken;
 
         // Log the action
         \App\Models\AuditLog::createLog('App\Models\Tenant', $tenant->id, 'impersonate_start', null, ['target_user_id' => $user->id]);
 
-        // Redirect to Frontend with token
-        // Assuming Frontend is running on localhost:3000 for development or defined in env
-        $frontendUrl = env('FRONTEND_URL', 'http://localhost:3000');
-        
-        return redirect()->away("$frontendUrl/login?impersonate_token=$token");
+        // Redirect to Frontend. Put token in URL fragment (not sent to server/referrer).
+        $frontendUrl = rtrim(env('FRONTEND_URL', 'http://localhost:3000'), '/');
+        $encodedToken = rawurlencode($token);
+
+        return redirect()->away("{$frontendUrl}/login#impersonate_token={$encodedToken}");
     }
 
     public function destroy(Tenant $tenant)

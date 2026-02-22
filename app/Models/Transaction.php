@@ -18,6 +18,7 @@ class Transaction extends Model
         'customer_id',
         'user_id',
         'transaction_date',
+        'settled_at',
         'subtotal',
         'discount_amount',
         'tax_amount',
@@ -33,6 +34,7 @@ class Transaction extends Model
     {
         return [
             'transaction_date' => 'datetime',
+            'settled_at' => 'datetime',
             'subtotal' => 'decimal:2',
             'discount_amount' => 'decimal:2',
             'tax_amount' => 'decimal:2',

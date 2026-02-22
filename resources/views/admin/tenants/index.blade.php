@@ -91,7 +91,10 @@
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                         <a href="{{ route('admin.tenants.edit', $tenant) }}" class="text-indigo-600 hover:text-indigo-900 mr-3">Edit</a>
-                                        <a href="{{ route('admin.tenants.impersonate', $tenant) }}" class="text-purple-600 hover:text-purple-900 mr-3" title="Impersonate Owner" onclick="return confirm('Login as this tenant owner?')">Login As</a>
+                                        <form action="{{ route('admin.tenants.impersonate', $tenant) }}" method="POST" class="inline">
+                                            @csrf
+                                            <button type="submit" class="text-purple-600 hover:text-purple-900 mr-3" title="Impersonate Owner" onclick="return confirm('Login as this tenant owner?')">Login As</button>
+                                        </form>
                                         <a href="{{ route('admin.tenants.show', $tenant) }}" class="text-gray-600 hover:text-gray-900">View</a>
                                     </td>
                                 </tr>

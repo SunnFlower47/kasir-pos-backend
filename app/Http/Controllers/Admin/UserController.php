@@ -75,11 +75,7 @@ class UserController extends Controller
             'email' => ['required', 'email', Rule::unique('users')->ignore($user->id)],
             'password' => 'nullable|string|min:8|confirmed',
             'is_active' => 'boolean',
-             // Role update logic is tricky. 
-             // If System User -> assign System Roles.
-             // If Tenant User -> usually managed by Tenant. But SysAdmin can override?
-             // Let's allow SysAdmin to assign Global Roles only if user is System.
-             // If user is Tenant, changing role might break their access if role is 'system' scope.
+            'role' => 'nullable|string|exists:roles,name',
         ]);
 
         // Security: Prevent assigning System Role to Tenant User

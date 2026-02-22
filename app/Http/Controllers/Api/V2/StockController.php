@@ -27,6 +27,7 @@ class StockController extends Controller
             'search' => 'nullable|string',
             'category_id' => 'nullable|exists:categories,id',
             'low_stock_only' => 'nullable|boolean',
+            'status' => 'nullable|in:normal,rendah,habis',
         ]);
 
         /** @var User $user */
@@ -75,6 +76,20 @@ class StockController extends Controller
             $query->whereRaw('quantity <= (SELECT min_stock FROM products WHERE products.id = product_stocks.product_id)');
         }
 
+        // Filter by stock status (server-side, so pagination works with filters)
+        if ($request->filled('status')) {
+            $status = strtolower((string) $request->status);
+
+            if ($status === 'habis') {
+                $query->where('quantity', '<=', 0);
+            } elseif ($status === 'rendah') {
+                $query->where('quantity', '>', 0)
+                    ->whereRaw('quantity <= (SELECT min_stock FROM products WHERE products.id = product_stocks.product_id)');
+            } elseif ($status === 'normal') {
+                $query->whereRaw('quantity > (SELECT min_stock FROM products WHERE products.id = product_stocks.product_id)');
+            }
+        }
+
         $perPage = $request->get('per_page', 15);
         $stocks = $query->paginate($perPage);
 
@@ -117,15 +132,21 @@ class StockController extends Controller
         try {
             $productStock = ProductStock::where('product_id', $request->product_id)
                                       ->where('outlet_id', $request->outlet_id)
+                                      ->lockForUpdate()
                                       ->first();
 
             if (!$productStock) {
                 // Create new stock record if doesn't exist
-                $productStock = ProductStock::create([
+                $createdStock = ProductStock::create([
                     'product_id' => $request->product_id,
                     'outlet_id' => $request->outlet_id,
                     'quantity' => 0,
                 ]);
+
+                // Re-lock the newly created row to keep this operation race-safe
+                $productStock = ProductStock::where('id', $createdStock->id)
+                                          ->lockForUpdate()
+                                          ->first();
             }
 
             $oldQuantity = $productStock->quantity;
@@ -202,14 +223,30 @@ class StockController extends Controller
                     continue;
                 }
 
-                // Find or create product stock record
-                $productStock = ProductStock::firstOrCreate(
-                    [
-                        'product_id' => $item['product_id'],
-                        'outlet_id' => $request->outlet_id
-                    ],
-                    ['quantity' => 0]
-                );
+                // Find + lock stock row, create safely if missing, then re-lock.
+                // This avoids race conditions when multiple opname requests hit same product/outlet.
+                $productStock = ProductStock::where('product_id', $item['product_id'])
+                    ->where('outlet_id', $request->outlet_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$productStock) {
+                    try {
+                        ProductStock::create([
+                            'product_id' => $item['product_id'],
+                            'outlet_id' => $request->outlet_id,
+                            'quantity' => 0,
+                        ]);
+                    } catch (\Illuminate\Database\QueryException $e) {
+                        // Unique key collision from parallel insert is expected in race scenarios.
+                        // Continue and fetch the row under lock below.
+                    }
+
+                    $productStock = ProductStock::where('product_id', $item['product_id'])
+                        ->where('outlet_id', $request->outlet_id)
+                        ->lockForUpdate()
+                        ->first();
+                }
 
                 $oldQuantity = $productStock->quantity;
                 $newQuantity = $item['physical_stock'];
@@ -335,13 +372,23 @@ class StockController extends Controller
         DB::beginTransaction();
         try {
             foreach ($request->items as $item) {
-                // Get or create product stock
-                $productStock = ProductStock::firstOrCreate([
-                    'product_id' => $item['product_id'],
-                    'outlet_id' => $request->outlet_id
-                ], [
-                    'quantity' => 0
-                ]);
+                // Get stock row with lock to avoid lost update in concurrent incoming requests
+                $productStock = ProductStock::where('product_id', $item['product_id'])
+                    ->where('outlet_id', $request->outlet_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$productStock) {
+                    $createdStock = ProductStock::create([
+                        'product_id' => $item['product_id'],
+                        'outlet_id' => $request->outlet_id,
+                        'quantity' => 0,
+                    ]);
+
+                    $productStock = ProductStock::where('id', $createdStock->id)
+                        ->lockForUpdate()
+                        ->first();
+                }
 
                 $oldQuantity = $productStock->quantity;
                 $newQuantity = $oldQuantity + $item['quantity'];

@@ -104,8 +104,20 @@ class StoreTransactionRequest extends FormRequest
                 }
             }
 
+            // Guardrail: global discount cannot exceed subtotal after item-level discounts
+            if ($totalDiscount > $subtotal) {
+                $validator->errors()->add('discount_amount', 'Discount amount cannot exceed subtotal.');
+                return;
+            }
+
             $totalAmount = $subtotal + $totalTax - $totalDiscount;
             $paidAmount = $this->paid_amount ?? 0;
+
+            // Guardrail: prevent negative totals from malformed payloads
+            if ($totalAmount < 0) {
+                $validator->errors()->add('total_amount', 'Total amount cannot be negative.');
+                return;
+            }
 
             // Strict check: paid amount must be >= total amount for completed transactions
             // Use a small epsilon for float comparison to avoid precision issues

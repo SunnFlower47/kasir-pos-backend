@@ -65,7 +65,7 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => 'Asia/Jakarta',
 
     /*
     |--------------------------------------------------------------------------
@@ -104,6 +104,18 @@ return [
             explode(',', (string) env('APP_PREVIOUS_KEYS', ''))
         ),
     ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Maintenance Secret
+    |--------------------------------------------------------------------------
+    |
+    | Secret path used by `php artisan down --secret` to bypass maintenance
+    | mode for trusted admins only. Keep this value random and private.
+    |
+    */
+
+    'maintenance_secret' => env('MAINTENANCE_SECRET'),
 
     /*
     |--------------------------------------------------------------------------

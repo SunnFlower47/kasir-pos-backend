@@ -64,12 +64,16 @@ class DashboardController extends Controller
             'filtered_outlet_id' => $effectiveOutletId,
         ];
 
-        // Transaction statistics - use simpler queries for better reliability
-        $completedQuery = Transaction::where('status', 'completed');
+        // Transaction statistics
+        // - Revenue uses gross sales (completed + refunded) so refund subtraction works consistently
+        // - Transaction counts use completed only (refunded transactions should not inflate count)
+        $grossSalesQuery = Transaction::whereIn('status', ['completed', 'refunded']);
+        $completedCountQuery = Transaction::where('status', 'completed');
         $refundedQuery = Transaction::where('status', 'refunded');
 
         if ($effectiveOutletId) {
-            $completedQuery->where('outlet_id', $effectiveOutletId);
+            $grossSalesQuery->where('outlet_id', $effectiveOutletId);
+            $completedCountQuery->where('outlet_id', $effectiveOutletId);
             $refundedQuery->where('outlet_id', $effectiveOutletId);
         }
 
@@ -80,7 +84,7 @@ class DashboardController extends Controller
         $lastMonthStart = $lastMonth->startOfDay()->toDateTimeString();
 
         // Debug: Check if we have any transactions at all
-        $totalCompleted = (clone $completedQuery)->count();
+        $totalCompleted = (clone $completedCountQuery)->count();
         \Illuminate\Support\Facades\Log::info('Dashboard query check', [
             'effectiveOutletId' => $effectiveOutletId,
             'totalCompleted' => $totalCompleted,
@@ -90,28 +94,26 @@ class DashboardController extends Controller
 
         // Completed transactions stats - Optimized queries with database aggregation
         try {
-            // Today's stats - use database aggregation instead of PHP sum()
-            $todayStats = (clone $completedQuery)
+            // Today's stats
+            $transactionsToday = (int) ((clone $completedCountQuery)
                 ->whereBetween('transaction_date', [$todayStart, $todayEnd])
-                ->selectRaw('COUNT(*) as transactions_count, COALESCE(SUM(total_amount), 0) as revenue_sum')
-                ->first();
-            $transactionsToday = (int) ($todayStats->transactions_count ?? 0);
-            $revenueToday = (float) ($todayStats->revenue_sum ?? 0);
+                ->count() ?? 0);
+            $revenueToday = (float) ((clone $grossSalesQuery)
+                ->whereBetween('transaction_date', [$todayStart, $todayEnd])
+                ->sum('total_amount') ?? 0);
 
-            // This month's stats - use database aggregation
-            $thisMonthStats = (clone $completedQuery)
+            // This month's stats
+            $transactionsThisMonth = (int) ((clone $completedCountQuery)
                 ->where('transaction_date', '>=', $thisMonthStart)
-                ->selectRaw('COUNT(*) as transactions_count, COALESCE(SUM(total_amount), 0) as revenue_sum')
-                ->first();
-            $transactionsThisMonth = (int) ($thisMonthStats->transactions_count ?? 0);
-            $revenueThisMonth = (float) ($thisMonthStats->revenue_sum ?? 0);
+                ->count() ?? 0);
+            $revenueThisMonth = (float) ((clone $grossSalesQuery)
+                ->where('transaction_date', '>=', $thisMonthStart)
+                ->sum('total_amount') ?? 0);
 
-            // Last month's stats - use database aggregation
-            $lastMonthStats = (clone $completedQuery)
+            // Last month's stats
+            $revenueLastMonth = (float) ((clone $grossSalesQuery)
                 ->whereBetween('transaction_date', [$lastMonthStart, $thisMonthStart])
-                ->selectRaw('COALESCE(SUM(total_amount), 0) as revenue_sum')
-                ->first();
-            $revenueLastMonth = (float) ($lastMonthStats->revenue_sum ?? 0);
+                ->sum('total_amount') ?? 0);
 
             $completedStats = (object)[
                 'transactions_today' => $transactionsToday,
@@ -260,19 +262,20 @@ class DashboardController extends Controller
         }
         $recentTransactions = $recentTransactionsQuery->get();
 
-        // Top selling products (this month)
+        // Top selling products (this month) - net of refunds
         $topProductsQuery = DB::table('transaction_items')
             ->join('transactions', 'transaction_items.transaction_id', '=', 'transactions.id')
             ->join('products', 'transaction_items.product_id', '=', 'products.id')
-            ->where('transactions.status', 'completed')
+            ->whereIn('transactions.status', ['completed', 'refunded'])
             ->where('transactions.transaction_date', '>=', $thisMonth)
             ->select(
                 'products.id',
                 'products.name',
-                DB::raw('SUM(transaction_items.quantity) as total_sold'),
-                DB::raw('SUM(transaction_items.total_price) as total_revenue')
+                DB::raw("SUM(CASE WHEN transactions.status = 'refunded' THEN -transaction_items.quantity ELSE transaction_items.quantity END) as total_sold"),
+                DB::raw("SUM(CASE WHEN transactions.status = 'refunded' THEN -transaction_items.total_price ELSE transaction_items.total_price END) as total_revenue")
             )
             ->groupBy('products.id', 'products.name')
+            ->havingRaw('SUM(CASE WHEN transactions.status = \'refunded\' THEN -transaction_items.quantity ELSE transaction_items.quantity END) > 0')
             ->orderBy('total_sold', 'desc')
             ->take(5);
 
@@ -308,20 +311,31 @@ class DashboardController extends Controller
         }
         $outOfStockProducts = $outOfStockQuery->get();
 
-        // Sales chart data (last 7 days)
+        // Sales chart data (last 7 days) - use net revenue for consistency with dashboard cards
         $salesChartData = [];
         for ($i = 6; $i >= 0; $i--) {
             $date = now()->subDays($i)->toDateString();
-            $salesQuery = Transaction::where('status', 'completed')
+
+            $grossSalesQuery = Transaction::whereIn('status', ['completed', 'refunded'])
                 ->whereDate('transaction_date', $date);
+            $refundQuery = Transaction::where('status', 'refunded')
+                ->whereDate('transaction_date', $date);
+            $transactionsQuery = Transaction::where('status', 'completed')
+                ->whereDate('transaction_date', $date);
+
             if ($effectiveOutletId) {
-                $salesQuery->where('outlet_id', $effectiveOutletId);
+                $grossSalesQuery->where('outlet_id', $effectiveOutletId);
+                $refundQuery->where('outlet_id', $effectiveOutletId);
+                $transactionsQuery->where('outlet_id', $effectiveOutletId);
             }
+
+            $grossSales = (float) ($grossSalesQuery->sum('total_amount') ?? 0);
+            $refunds = (float) ($refundQuery->sum('total_amount') ?? 0);
 
             $salesChartData[] = [
                 'date' => $date,
-                'revenue' => (float) ($salesQuery->sum('total_amount') ?? 0),
-                'transactions' => (int) ($salesQuery->count() ?? 0),
+                'revenue' => $grossSales - $refunds,
+                'transactions' => (int) ($transactionsQuery->count() ?? 0),
             ];
         }
 

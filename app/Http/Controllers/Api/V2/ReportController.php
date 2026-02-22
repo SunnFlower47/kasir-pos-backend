@@ -90,12 +90,15 @@ class ReportController extends Controller
 
         // Group by period if requested
         if ($request->group_by) {
-            // SQLite compatible group by expressions
+            $driver = DB::connection()->getDriverName();
+            $isSqlite = $driver === 'sqlite';
+
+            // DB-driver compatible group by expressions
             $groupByExpression = match($request->group_by) {
-                'day' => 'date(transaction_date)',
-                'week' => 'strftime("%Y-%W", transaction_date)',
-                'month' => 'strftime("%Y-%m", transaction_date)',
-                default => 'date(transaction_date)',
+                'day' => $isSqlite ? 'date(transaction_date)' : 'DATE(transaction_date)',
+                'week' => $isSqlite ? 'strftime("%Y-%W", transaction_date)' : 'DATE_FORMAT(transaction_date, "%Y-%u")',
+                'month' => $isSqlite ? 'strftime("%Y-%m", transaction_date)' : 'DATE_FORMAT(transaction_date, "%Y-%m")',
+                default => $isSqlite ? 'date(transaction_date)' : 'DATE(transaction_date)',
             };
 
             $groupedData = (clone $query)
@@ -1126,9 +1129,13 @@ class ReportController extends Controller
                 return $query->where('status', $request->status);
             });
 
-        // Use SQLite compatible date formatting
+        $driver = DB::connection()->getDriverName();
+        $isSqlite = $driver === 'sqlite';
+        $monthExpression = $isSqlite ? 'strftime("%Y-%m", purchase_date)' : 'DATE_FORMAT(purchase_date, "%Y-%m")';
+
+        // Use DB-driver compatible date formatting
         $monthlyBreakdown = $monthlyQuery->select(
-                DB::raw('strftime("%Y-%m", purchase_date) as month'),
+                DB::raw($monthExpression . ' as month'),
                 DB::raw('COUNT(*) as purchase_count'),
                 DB::raw('SUM(total_amount) as total_amount'),
                 DB::raw('SUM(paid_amount) as total_paid')

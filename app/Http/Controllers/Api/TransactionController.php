@@ -30,7 +30,7 @@ class TransactionController extends Controller
                 'customer:id,name,email,phone',
                 'outlet:id,name',
                 'user:id,name,email',
-                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,unit_id,conversion_factor',
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,discount_amount,unit_id,conversion_factor',
                 'transactionItems.product:id,name,sku',
                 'transactionItems.unit:id,name,symbol'
             ]);
@@ -186,6 +186,7 @@ class TransactionController extends Controller
                 'customer_id' => $request->customer_id,
                 'user_id' => $user->id,
                 'transaction_date' => $transactionDate,
+                'settled_at' => $status === 'completed' ? $transactionDate : null,
                 'subtotal' => 0,
                 'discount_amount' => $request->discount_amount ?? 0,
                 'tax_amount' => $request->tax_amount ?? 0,
@@ -214,20 +215,7 @@ class TransactionController extends Controller
                     throw new \Exception("No stock record found for product: {$product->name} at outlet ID: {$outletId}");
                 }
 
-                if ($productStock->quantity < $item['quantity']) {
-                    throw new \Exception("Insufficient stock for product: {$product->name}. Available: {$productStock->quantity}, Requested: {$item['quantity']}");
-                }
-
-                // Calculate item total
-                // Use the unit_price sent from frontend (respects wholesale price selection)
-                // Only fallback to product selling_price if unit_price is not provided
-                $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0
-                    ? (float) $item['unit_price']
-                    : $product->selling_price;
-                $itemDiscount = $item['discount_amount'] ?? 0;
-                $totalPrice = ($unitPrice * $item['quantity']) - $itemDiscount;
-
-
+                // Determine unit and conversion factor BEFORE stock validation
                 $unitId = $item['unit_id'] ?? $product->unit_id;
                 
                 // Robustly determine conversion factor from Database
@@ -243,6 +231,44 @@ class TransactionController extends Controller
                         $conversionFactor = $productUnit->conversion_factor;
                     }
                 }
+
+                // Calculate required quantity in BASE UNIT for proper validation
+                // e.g., buying 1 pcs with conversion_factor 0.25 = 0.25 base units required
+                $requiredBaseQty = $item['quantity'] * $conversionFactor;
+
+                // Validate stock using BASE UNIT comparison (fixes multi-unit validation bug)
+                if ($productStock->quantity < $requiredBaseQty) {
+                    $baseUnitName = $product->unit?->name ?? 'unit';
+                    throw new \Exception("Insufficient stock for product: {$product->name}. Available: {$productStock->quantity} {$baseUnitName}, Required: {$requiredBaseQty} {$baseUnitName}");
+                }
+
+                // Calculate item total
+                // Use the unit_price sent from frontend (respects wholesale price selection)
+                // Only fallback to product selling_price if unit_price is not provided
+                $unitPrice = isset($item['unit_price']) && $item['unit_price'] > 0
+                    ? (float) $item['unit_price']
+                    : $product->selling_price;
+
+                $quantity = (float) ($item['quantity'] ?? 0);
+                $lineBaseTotal = $unitPrice * $quantity;
+
+                // Accept both discount_amount (preferred) and discount (fallback)
+                $rawItemDiscount = $item['discount_amount'] ?? $item['discount'] ?? null;
+
+                // Fallback inference when item discount is missing/zero but total_price is provided
+                // This protects cases where frontend sends discounted total_price but discount_amount ends up 0.
+                if (($rawItemDiscount === null || (float) $rawItemDiscount <= 0) && isset($item['total_price'])) {
+                    $incomingTotalPrice = (float) $item['total_price'];
+                    $inferredDiscount = max(0, $lineBaseTotal - $incomingTotalPrice);
+                    if ($inferredDiscount > 0) {
+                        $rawItemDiscount = $inferredDiscount;
+                    }
+                }
+
+                $itemDiscount = max(0, (float) ($rawItemDiscount ?? 0));
+
+                // Keep server-side total consistent with resolved discount
+                $totalPrice = $lineBaseTotal - $itemDiscount;
 
                 // Determine Purchase Price (Modal)
                 // 1. Default to effective base purchase price (Base Price * Conversion)
@@ -340,7 +366,7 @@ class TransactionController extends Controller
                 'customer:id,name,email,phone',
                 'outlet:id,name',
                 'user:id,name,email',
-                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,unit_id,conversion_factor',
+                'transactionItems:id,transaction_id,product_id,quantity,unit_price,total_price,discount_amount,unit_id,conversion_factor',
                 'transactionItems.unit:id,name',
                 'transactionItems.product:id,name,sku,selling_price,purchase_price,unit_id',
                 'transactionItems.product.category:id,name',
@@ -446,42 +472,74 @@ class TransactionController extends Controller
 
         DB::beginTransaction();
         try {
-            // Return stock for each item
-            foreach ($transaction->transactionItems as $item) {
-                $productStock = ProductStock::where('product_id', $item->product_id)
-                                          ->where('outlet_id', $transaction->outlet_id)
-                                          ->first();
+            // Re-lock transaction row to prevent concurrent double-refund
+            $lockedTransaction = Transaction::with('transactionItems')
+                ->where('id', $transaction->id)
+                ->lockForUpdate()
+                ->first();
 
-                if ($productStock) {
-                    $productStock->addStock(
-                        $item->quantity,
-                        'in',
-                        Transaction::class,
-                        $transaction->id,
-                        "Refund transaction {$transaction->transaction_number}"
-                    );
+            if (!$lockedTransaction) {
+                throw new \Exception('Transaction not found');
+            }
+
+            if ($lockedTransaction->status !== 'completed') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only completed transactions can be refunded'
+                ], 422);
+            }
+
+            // Return stock for each item (with row lock)
+            foreach ($lockedTransaction->transactionItems as $item) {
+                $productStock = ProductStock::where('product_id', $item->product_id)
+                    ->where('outlet_id', $lockedTransaction->outlet_id)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$productStock) {
+                    $createdStock = ProductStock::create([
+                        'product_id' => $item->product_id,
+                        'outlet_id' => $lockedTransaction->outlet_id,
+                        'quantity' => 0,
+                    ]);
+
+                    $productStock = ProductStock::where('id', $createdStock->id)
+                        ->lockForUpdate()
+                        ->first();
                 }
+
+                // Return stock in BASE UNIT (must match deduction logic on sale)
+                $qtyToReturn = $item->quantity * ($item->conversion_factor > 0 ? $item->conversion_factor : 1);
+
+                $productStock->addStock(
+                    $qtyToReturn,
+                    'in',
+                    Transaction::class,
+                    $lockedTransaction->id,
+                    "Refund transaction {$lockedTransaction->transaction_number}"
+                );
             }
 
             // Deduct loyalty points if customer exists
-            if ($transaction->customer_id) {
-                $customer = Customer::find($transaction->customer_id);
+            if ($lockedTransaction->customer_id) {
+                $customer = Customer::find($lockedTransaction->customer_id);
                 // Use new loyalty_points_per_rupiah (backward compatible with loyalty_points_rate)
                 $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_per_rupiah', null);
                 if ($pointsPerRupiah === null) {
                     // Fallback to old loyalty_points_rate for backward compatibility
                     $pointsPerRupiah = \App\Models\Setting::get('loyalty_points_rate', 200);
                 }
-                $points = floor($transaction->total_amount / $pointsPerRupiah);
+                $points = floor($lockedTransaction->total_amount / $pointsPerRupiah);
                 if ($points > 0) {
                     $customer->deductLoyaltyPoints($points);
                 }
             }
 
             // Update transaction status
-            $transaction->update([
+            $lockedTransaction->update([
                 'status' => 'refunded',
-                'notes' => ($transaction->notes ?? '') . "\nRefund reason: " . $request->reason
+                'notes' => ($lockedTransaction->notes ?? '') . "\nRefund reason: " . $request->reason
             ]);
 
             DB::commit();
@@ -510,33 +568,43 @@ class TransactionController extends Controller
      */
     public function settle(Request $request, Transaction $transaction): JsonResponse
     {
-        if ($transaction->status !== 'pending') {
-            return response()->json([
-                'success' => false,
-                'message' => 'Hanya transaksi pending yang dapat dilunasi'
-            ], 422);
-        }
-
         try {
             DB::beginTransaction();
 
-            // Validate paid amount
-            $paidAmount = $request->paid_amount;
-            if ($paidAmount < $transaction->total_amount) {
+            $lockedTransaction = Transaction::where('id', $transaction->id)
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedTransaction || $lockedTransaction->status !== 'pending') {
+                DB::rollBack();
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Hanya transaksi pending yang dapat dilunasi'
+                ], 422);
+            }
+
+            // Validate paid amount against locked row to avoid race condition
+            $paidAmount = (float) $request->paid_amount;
+            if ($paidAmount < (float) $lockedTransaction->total_amount) {
+                DB::rollBack();
                 return response()->json([
                     'success' => false,
                     'message' => 'Jumlah pembayaran kurang dari total tagihan'
                 ], 422);
             }
 
-            $change = $paidAmount - $transaction->total_amount;
+            $change = $paidAmount - (float) $lockedTransaction->total_amount;
+            $settledAt = now()->timezone('Asia/Jakarta')->format('Y-m-d H:i:s');
+            $updatedNotes = "Lunas pada {$settledAt}";
 
-            $transaction->update([
+            $lockedTransaction->update([
                 'status' => 'completed',
                 'paid_amount' => $paidAmount,
                 'change_amount' => $change,
                 'payment_method' => $request->payment_method ?? 'cash',
-                'transaction_date' => now(), // Update date to now for reporting
+                'settled_at' => now(),
+                'notes' => $updatedNotes,
+                // Keep original transaction_date for accurate period reporting
             ]);
 
             DB::commit();
@@ -544,11 +612,11 @@ class TransactionController extends Controller
             return response()->json([
                 'success' => true,
                 'message' => 'Transaksi berhasil dilunasi',
-                'data' => $transaction->fresh(['customer', 'transactionItems.product', 'user', 'outlet'])
+                'data' => $lockedTransaction->fresh(['customer', 'transactionItems.product', 'user', 'outlet'])
             ]);
 
         } catch (\Exception $e) {
-            DB::rollback();
+            DB::rollBack();
             return response()->json([
                 'success' => false,
                 'message' => 'Gagal melunasi transaksi: ' . $e->getMessage()
@@ -556,3 +624,4 @@ class TransactionController extends Controller
         }
     }
 }
+

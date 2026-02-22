@@ -57,8 +57,9 @@ class ProductController extends Controller
             $query->where('is_active', $request->boolean('is_active'));
         }
 
-        // Add stock information for specific outlet if provided (optimize with eager loading)
-        if ($request->has('outlet_id') || $request->has('with_stock')) {
+        // Add stock information/filtering for specific outlet if requested
+        $needsStockContext = $request->has('outlet_id') || $request->has('with_stock') || $request->filled('stock_status');
+        if ($needsStockContext) {
             /** @var User $user */
             $user = Auth::user();
             $outletId = $request->get('outlet_id') ?? $user->outlet_id ?? 1; // Default to outlet 1
@@ -68,13 +69,40 @@ class ProductController extends Controller
                 $q->select('id', 'product_id', 'outlet_id', 'quantity')
                   ->where('outlet_id', $outletId);
             }]);
+
+            // Server-side stock status filter (so pagination is accurate)
+            if ($request->filled('stock_status')) {
+                $stockStatus = strtolower((string) $request->get('stock_status'));
+
+                if ($stockStatus === 'missing_stock') {
+                    $query->whereDoesntHave('productStocks', function ($q) use ($outletId) {
+                        $q->where('outlet_id', $outletId);
+                    });
+                } elseif ($stockStatus === 'out') {
+                    $query->whereHas('productStocks', function ($q) use ($outletId) {
+                        $q->where('outlet_id', $outletId)
+                          ->where('quantity', '<=', 0);
+                    });
+                } elseif ($stockStatus === 'low') {
+                    $query->whereHas('productStocks', function ($q) use ($outletId) {
+                        $q->where('outlet_id', $outletId)
+                          ->where('quantity', '>', 0)
+                          ->whereColumn('quantity', '<=', 'products.min_stock');
+                    });
+                } elseif ($stockStatus === 'normal') {
+                    $query->whereHas('productStocks', function ($q) use ($outletId) {
+                        $q->where('outlet_id', $outletId)
+                          ->whereColumn('quantity', '>', 'products.min_stock');
+                    });
+                }
+            }
         }
 
         $perPage = $request->get('per_page', 15);
         $products = $query->paginate($perPage);
 
         // Transform products to add stock info (already loaded, no additional queries)
-        if ($request->has('outlet_id') || $request->has('with_stock')) {
+        if ($needsStockContext) {
             $products->getCollection()->transform(function ($product) use ($outletId) {
                 $stock = $product->productStocks->first(); // Already loaded, no query needed
                 $product->stock_quantity = $stock ? $stock->quantity : 0;
@@ -240,9 +268,12 @@ class ProductController extends Controller
 
         // 2. If not found, try finding in product_units
         if (!$product) {
-            // Find the unit first
+            // Find the unit by barcode - accept if is_active is NULL or true (not explicitly false)
             $productUnit = \App\Models\ProductUnit::where('barcode', $barcode)
-                                ->where('is_active', true)
+                                ->where(function($query) {
+                                    $query->where('is_active', true)
+                                          ->orWhereNull('is_active');
+                                })
                                 ->with(['product.category', 'product.unit:id,name,symbol', 'product.productUnits.unit:id,name,symbol', 'unit:id,name,symbol'])
                                 ->first();
             

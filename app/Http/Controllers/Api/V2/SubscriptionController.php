@@ -5,31 +5,30 @@ namespace App\Http\Controllers\Api\V2;
 use App\Http\Controllers\Controller;
 use App\Models\Subscription;
 use App\Models\SubscriptionPayment;
+use App\Models\SubscriptionPlan;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Midtrans\Config;
 use Midtrans\Snap;
+use Midtrans\Transaction;
 
 class SubscriptionController extends Controller
 {
     public function __construct()
     {
-        // Set Midtrans Config
         Config::$serverKey = config('midtrans.server_key');
         Config::$isProduction = config('midtrans.is_production');
         Config::$isSanitized = config('midtrans.is_sanitized');
         Config::$is3ds = config('midtrans.is_3ds');
     }
 
-    /**
-     * Get current subscription status
-     */
     public function index(Request $request)
     {
         $tenant = $request->user()->tenant;
-        
+
         if (!$tenant) {
             return response()->json([
                 'success' => false,
@@ -50,23 +49,16 @@ class SubscriptionController extends Controller
         ]);
     }
 
-    /**
-     * Activate Free Trial (14 Days)
-     */
     public function activateTrial(Request $request)
     {
         $tenant = $request->user()->tenant;
-        
-        // Check if ever had trial? (Optional logic: if exists and is not 'inactive' maybe block?)
-        // For now simple logic: Update current subscription to trial active.
-        
         $subscription = $tenant->subscriptions()->latest()->first();
-        
+
         if (!$subscription) {
-             $subscription = Subscription::create([
+            $subscription = Subscription::create([
                 'tenant_id' => $tenant->id,
                 'status' => 'inactive',
-                'plan_name' => 'none', // Placeholder to satisfy strict SQL if migration wasn't fresh
+                'plan_name' => 'none',
                 'price' => 0,
                 'period' => 'monthly',
                 'start_date' => Carbon::now(),
@@ -74,7 +66,7 @@ class SubscriptionController extends Controller
         }
 
         if ($subscription->status === 'active' || ($subscription->plan_name === 'trial' && $subscription->end_date)) {
-             return response()->json([
+            return response()->json([
                 'success' => false,
                 'message' => 'Trial or Subscription is already active/used.'
             ], 400);
@@ -96,51 +88,34 @@ class SubscriptionController extends Controller
         ]);
     }
 
-    /**
-     * Get available plans (Mock data for now)
-     */
-    /**
-     * Get available plans (Dynamic from DB)
-     */
     public function plans()
     {
-        $plans = \App\Models\SubscriptionPlan::where('is_active', true)->get()->map(function($plan) {
+        $plans = SubscriptionPlan::where('is_active', true)->get()->map(function ($plan) {
             $rawFeatures = $plan->features;
-            
-            // Default Values
-            $displayFeatures = ['web', 'mobile', 'desktop']; // Fallback if totally empty, but better to be marketing text
+            $displayFeatures = ['web', 'mobile', 'desktop'];
             $platforms = ['web', 'mobile', 'desktop'];
             $popular = false;
             $cta = 'Pilih ' . $plan->name;
 
-            // Robust handling for features: Ensure it's decoded
             if (is_string($rawFeatures)) {
                 $decoded = json_decode($rawFeatures, true);
                 if (is_array($decoded)) {
                     $rawFeatures = $decoded;
                 }
             }
-            
+
             if (is_array($rawFeatures)) {
-                // Check if it's the NEW structure (has 'display_features' key)
                 if (isset($rawFeatures['display_features'])) {
                     $displayFeatures = $rawFeatures['display_features'];
                     $platforms = $rawFeatures['platforms'] ?? ['web', 'mobile', 'desktop'];
                     $popular = $rawFeatures['is_popular'] ?? false;
                     $cta = $rawFeatures['cta_text'] ?? ('Pilih ' . $plan->name);
-                } 
-                // Check if it's the OLD structure (simple array of limits or strings)
-                // If keys are 'max_users' etc, it's limits. If integer indexed, it might be strings.
-                else if (isset($rawFeatures['max_users']) || isset($rawFeatures['limits'])) {
-                     // It's just limits, so we don't have display features. 
-                     // Provide generic features based on limits? Or just empty.
-                     $displayFeatures = [];
-                     if (isset($rawFeatures['max_users']) && $rawFeatures['max_users'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_users']} Users";
-                     if (isset($rawFeatures['max_outlets']) && $rawFeatures['max_outlets'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_outlets']} Outlets";
-                }
-                else {
-                    // It might be a simple array of strings (old legacy data if any)
-                    $displayFeatures = $rawFeatures; 
+                } elseif (isset($rawFeatures['max_users']) || isset($rawFeatures['limits'])) {
+                    $displayFeatures = [];
+                    if (isset($rawFeatures['max_users']) && $rawFeatures['max_users'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_users']} Users";
+                    if (isset($rawFeatures['max_outlets']) && $rawFeatures['max_outlets'] > 0) $displayFeatures[] = "Max {$rawFeatures['max_outlets']} Outlets";
+                } else {
+                    $displayFeatures = $rawFeatures;
                 }
             }
 
@@ -148,7 +123,7 @@ class SubscriptionController extends Controller
                 'id' => $plan->slug,
                 'name' => $plan->name,
                 'price' => (float)$plan->price,
-                'period' => $plan->slug, // Using slug as period identifier for now
+                'period' => $plan->slug,
                 'features' => $displayFeatures,
                 'platforms' => $platforms,
                 'popular' => $popular,
@@ -163,9 +138,6 @@ class SubscriptionController extends Controller
         ]);
     }
 
-    /**
-     * Create Payment Token (Snap)
-     */
     public function createPayment(Request $request)
     {
         $request->validate([
@@ -175,236 +147,242 @@ class SubscriptionController extends Controller
         $tenant = $request->user()->tenant;
         $user = $request->user();
 
-        // Pricing Logic (Dynamic)
-        $plan = \App\Models\SubscriptionPlan::where('slug', $request->plan_id)->firstOrFail();
-        $price = (float) $plan->price;
-        $planName = $plan->name;
+        $plan = SubscriptionPlan::where('slug', $request->plan_id)->firstOrFail();
+        $price = (float)$plan->price;
 
         DB::beginTransaction();
         try {
-            // Generate Order ID
-            $orderId = 'SUB-' . $tenant->id . '-' . time();
-
-            // Create Payment Record (Pending)
-            // Note: We don't create the *Subscription* record yet, or we update the existing one?
-            // Strategy: Create a Payment record first. Upon success, extend/create Subscription.
-            // But we need to link it to *a* subscription. 
-            // Let's grab the current subscription (even if expired) or create a placeholder.
-            // Actually, SubscriptionPayment belongs to Subscription.
-            // So we should find the current subscription or create a new 'pending' one?
-            // Better approach: Just track the Payment. If successful, THEN update the Subscription.
-            // BUT, the schema says payment belongs to subscription.
-            // So we take the current subscription (active or expired) or create a new one if none exists.
-            
+            $orderId = sprintf('SUB-%d-%s', $tenant->id, Str::upper(Str::random(12)));
             $subscription = $tenant->subscriptions()->latest()->first();
 
             if (!$subscription) {
-                // Should have been created at register, but just in case
-                 $subscription = Subscription::create([
+                $subscription = Subscription::create([
                     'tenant_id' => $tenant->id,
                     'plan_name' => $request->plan_id,
                     'status' => 'pending',
                     'price' => $price,
                     'period' => $request->plan_id,
                     'start_date' => Carbon::now(),
-                    'end_date' => Carbon::now(), // Expired/Pending
+                    'end_date' => Carbon::now(),
                 ]);
             }
-            
-            $payment = SubscriptionPayment::create([
+
+            $paymentMeta = [
+                'plan_slug' => $plan->slug,
+                'plan_name' => $plan->name,
+                'duration_in_days' => (int)($plan->duration_in_days ?: 30),
+            ];
+
+            SubscriptionPayment::create([
                 'subscription_id' => $subscription->id,
                 'order_id' => $orderId,
                 'amount' => $price,
                 'status' => 'pending',
-                'notes' => 'Renewal for ' . $planName
+                'notes' => json_encode($paymentMeta),
             ]);
 
-            // Midtrans Params
             $params = [
                 'transaction_details' => [
                     'order_id' => $orderId,
-                    'gross_amount' => $price,
+                    'gross_amount' => (int)round($price),
                 ],
                 'customer_details' => [
                     'first_name' => $user->name,
                     'email' => $user->email,
                     'phone' => $user->phone,
                 ],
-                'item_details' => [
-                    [
-                        'id' => $request->plan_id,
-                        'price' => $price,
-                        'quantity' => 1,
-                        'name' => $planName,
-                    ]
-                ]
+                'item_details' => [[
+                    'id' => $plan->slug,
+                    'price' => (int)round($price),
+                    'quantity' => 1,
+                    'name' => $plan->name,
+                ]]
             ];
 
             $snapToken = Snap::getSnapToken($params);
-            
             DB::commit();
+
+            $base = config('midtrans.is_production')
+                ? 'https://app.midtrans.com/snap/v2/vtweb/'
+                : 'https://app.sandbox.midtrans.com/snap/v2/vtweb/';
 
             return response()->json([
                 'success' => true,
                 'data' => [
                     'token' => $snapToken,
-                    'redirect_url' => "https://app.midtrans.com/snap/v2/vtweb/" . $snapToken
+                    'redirect_url' => $base . $snapToken,
                 ]
             ]);
-
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             DB::rollBack();
-            Log::error('Midtrans Error: ' . $e->getMessage());
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
+            Log::error('Create payment failed', ['error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to create payment'], 500);
         }
     }
 
-    /**
-     * Handle Midtrans Webhook
-     * NOTE: This should be excluded from CSRF and Auth middleware
-     */
     public function callback(Request $request)
     {
+        $request->validate([
+            'order_id' => 'required|string',
+            'status_code' => 'required',
+            'gross_amount' => 'required',
+            'signature_key' => 'required|string',
+            'transaction_status' => 'required|string',
+        ]);
+
         $serverKey = config('midtrans.server_key');
         $hashed = hash('sha512', $request->order_id . $request->status_code . $request->gross_amount . $serverKey);
-        
-        // Simple signature verification (Midtrans usually sends 'signature_key')
-        if ($request->signature_key !== $hashed) {
-            return response()->json(['message' => 'Invalid Signature'], 400);
+
+        if (!hash_equals($hashed, (string)$request->signature_key)) {
+            return response()->json(['message' => 'Invalid signature'], 400);
         }
 
-        $transactionStatus = $request->transaction_status;
-        $orderId = $request->order_id;
-        $payment = SubscriptionPayment::where('order_id', $orderId)->first();
+        try {
+            return DB::transaction(function () use ($request) {
+                $payment = SubscriptionPayment::where('order_id', $request->order_id)
+                    ->lockForUpdate()
+                    ->first();
 
-        if (!$payment) {
-            return response()->json(['message' => 'Order not found'], 404);
-        }
-
-        if ($transactionStatus == 'capture' || $transactionStatus == 'settlement') {
-            // Payment Success
-            DB::transaction(function () use ($payment, $request) {
-                $payment->update([
-                    'status' => 'paid',
-                    'midtrans_response' => $request->all(),
-                    'payment_date' => Carbon::now()
-                ]);
-
-                // Update Subscription
-                $subscription = $payment->subscription;
-                
-                // Determine new dates
-                // If currently active and future, add to end_date. Otherwise start from now.
-                $startDate = Carbon::now();
-                if ($subscription->end_date && $subscription->end_date->isFuture()) {
-                    $startDate = $subscription->end_date;
+                if (!$payment) {
+                    return response()->json(['message' => 'Order not found'], 404);
                 }
 
-                // Add month/year
-                $period = $payment->notes; // Or infer from amount/plan
-                // For simplicity, let's assume monthly (30 days) if amount ~ 100k
-                $daysToAdd = ($payment->amount >= 1000000) ? 365 : 30;
+                // idempotent: stop if already processed
+                if ($payment->status === 'paid') {
+                    return response()->json(['message' => 'Already processed'], 200);
+                }
 
-                $subscription->update([
-                    'plan_name' => $payment->amount >= 1000000 ? 'yearly' : 'monthly',
-                    'status' => 'active',
-                    'end_date' => $startDate->copy()->addDays($daysToAdd),
-                    'next_billing_date' => $startDate->copy()->addDays($daysToAdd)
-                ]);
+                if ((float)$payment->amount !== (float)$request->gross_amount) {
+                    Log::warning('Midtrans gross_amount mismatch', [
+                        'order_id' => $request->order_id,
+                        'expected' => $payment->amount,
+                        'received' => $request->gross_amount,
+                    ]);
+                    return response()->json(['message' => 'Amount mismatch'], 400);
+                }
+
+                $status = $request->transaction_status;
+                $fraudStatus = $request->fraud_status;
+
+                if ($status === 'capture' && $fraudStatus === 'challenge') {
+                    $payment->update([
+                        'status' => 'pending',
+                        'midtrans_response' => $request->all(),
+                    ]);
+
+                    return response()->json(['message' => 'Payment challenged'], 200);
+                }
+
+                if ($status === 'capture' || $status === 'settlement') {
+                    $payment->update([
+                        'status' => 'paid',
+                        'payment_method' => $request->payment_type,
+                        'transaction_reference' => $request->transaction_id,
+                        'midtrans_response' => $request->all(),
+                        'payment_date' => Carbon::now(),
+                    ]);
+
+                    $this->applySubscriptionFromPayment($payment);
+                    return response()->json(['message' => 'OK'], 200);
+                }
+
+                if (in_array($status, ['deny', 'expire', 'cancel'], true)) {
+                    $payment->update([
+                        'status' => 'failed',
+                        'payment_method' => $request->payment_type,
+                        'transaction_reference' => $request->transaction_id,
+                        'midtrans_response' => $request->all(),
+                    ]);
+
+                    return response()->json(['message' => 'Updated'], 200);
+                }
+
+                return response()->json(['message' => 'Ignored'], 200);
             });
-
-        } else if ($transactionStatus == 'deny' || $transactionStatus == 'expire' || $transactionStatus == 'cancel') {
-            $payment->update([
-                'status' => 'failed',
-                'midtrans_response' => $request->all()
-            ]);
+        } catch (\Throwable $e) {
+            Log::error('Midtrans callback failed', ['error' => $e->getMessage()]);
+            return response()->json(['message' => 'Internal server error'], 500);
         }
-
     }
 
-    /**
-     * Check Payment Status Manually (For Frontend polling or Localhost)
-     */
     public function checkStatus(Request $request)
     {
         $request->validate(['order_id' => 'required|string']);
 
+        $tenant = $request->user()->tenant;
+        if (!$tenant) {
+            return response()->json(['success' => false, 'message' => 'Tenant not found'], 404);
+        }
+
         $orderId = $request->order_id;
-        $payment = SubscriptionPayment::where('order_id', $orderId)->first();
+        $payment = SubscriptionPayment::where('order_id', $orderId)
+            ->whereHas('subscription', function ($q) use ($tenant) {
+                $q->where('tenant_id', $tenant->id);
+            })
+            ->first();
 
         if (!$payment) {
             return response()->json(['success' => false, 'message' => 'Payment not found'], 404);
         }
 
         try {
-            // Get Status from Midtrans
-            $status = \Midtrans\Transaction::status($orderId);
-            $transactionStatus = $status->transaction_status;
-            // $fraudStatus = $status->fraud_status;
+            $status = Transaction::status($orderId);
+            $transactionStatus = $status->transaction_status ?? null;
 
-            if ($transactionStatus == 'capture' || $transactionStatus == 'settlement') {
-                // Success - Update logic (Same as callback)
-                if ($payment->status !== 'paid') {
-                    DB::transaction(function () use ($payment, $status) {
-                        $payment->update([
-                            'status' => 'paid',
-                            'midtrans_response' => (array)$status,
-                            'payment_date' => Carbon::now()
-                        ]);
+            if ($transactionStatus === 'capture' || $transactionStatus === 'settlement') {
+                DB::transaction(function () use ($payment, $status) {
+                    $lockedPayment = SubscriptionPayment::where('id', $payment->id)->lockForUpdate()->first();
 
-                        // Update Subscription
-                        $subscription = $payment->subscription;
-                        
-                        // Determine new dates
-                        $startDate = Carbon::now();
-                        if ($subscription->end_date && $subscription->end_date->isFuture()) {
-                            $startDate = $subscription->end_date;
-                        }
+                    if ($lockedPayment->status === 'paid') {
+                        return;
+                    }
 
-                        // Add month/year
-                        $period = $payment->notes; 
-                        // Logic: if payment >= 1jt then 1 year, else 1 month
-                        $amount = (int)$payment->amount;
-                        $daysToAdd = ($amount >= 1000000) ? 365 : 30;
+                    $lockedPayment->update([
+                        'status' => 'paid',
+                        'payment_method' => $status->payment_type ?? null,
+                        'transaction_reference' => $status->transaction_id ?? null,
+                        'midtrans_response' => (array)$status,
+                        'payment_date' => Carbon::now(),
+                    ]);
 
-                        $subscription->update([
-                            'plan_name' => $amount >= 1000000 ? 'yearly' : 'monthly',
-                            'status' => 'active',
-                            'end_date' => $startDate->copy()->addDays($daysToAdd),
-                            'next_billing_date' => $startDate->copy()->addDays($daysToAdd)
-                        ]);
-                    });
-                }
+                    $this->applySubscriptionFromPayment($lockedPayment);
+                });
+
                 return response()->json(['success' => true, 'status' => 'paid', 'message' => 'Payment successful']);
+            }
 
-            } else if ($transactionStatus == 'pending') {
+            if ($transactionStatus === 'pending') {
                 return response()->json(['success' => true, 'status' => 'pending', 'message' => 'Waiting for payment']);
-            } else if ($transactionStatus == 'deny' || $transactionStatus == 'expire' || $transactionStatus == 'cancel') {
-                $payment->update(['status' => 'failed']);
+            }
+
+            if (in_array($transactionStatus, ['deny', 'expire', 'cancel'], true)) {
+                if ($payment->status !== 'paid') {
+                    $payment->update([
+                        'status' => 'failed',
+                        'midtrans_response' => (array)$status,
+                    ]);
+                }
+
                 return response()->json(['success' => false, 'status' => 'failed', 'message' => 'Payment failed']);
             }
 
             return response()->json(['success' => true, 'status' => $payment->status]);
-
-        } catch (\Exception $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 500);
-            }
-
+        } catch (\Throwable $e) {
+            Log::error('Check payment status failed', ['order_id' => $orderId, 'error' => $e->getMessage()]);
+            return response()->json(['success' => false, 'message' => 'Failed to check payment status'], 500);
+        }
     }
 
-    /**
-     * Get Payment History
-     */
     public function history(Request $request)
     {
         $tenant = $request->user()->tenant;
-        
-        $payments = SubscriptionPayment::whereHas('subscription', function($q) use ($tenant) {
+
+        $payments = SubscriptionPayment::whereHas('subscription', function ($q) use ($tenant) {
             $q->where('tenant_id', $tenant->id);
         })
-        ->orderBy('created_at', 'desc')
-        ->limit(20)
-        ->get();
+            ->orderBy('created_at', 'desc')
+            ->limit(20)
+            ->get();
 
         return response()->json([
             'success' => true,
@@ -412,5 +390,47 @@ class SubscriptionController extends Controller
         ]);
     }
 
-}
+    private function applySubscriptionFromPayment(SubscriptionPayment $payment): void
+    {
+        $subscription = $payment->subscription;
+        if (!$subscription) {
+            return;
+        }
 
+        $planMeta = $this->extractPlanMeta($payment);
+        $daysToAdd = max(1, (int)($planMeta['duration_in_days'] ?? 30));
+        $planName = $planMeta['plan_slug'] ?? ($planMeta['plan_name'] ?? $subscription->plan_name ?? 'monthly');
+
+        $startDate = Carbon::now();
+        if ($subscription->end_date && Carbon::parse($subscription->end_date)->isFuture()) {
+            $startDate = Carbon::parse($subscription->end_date);
+        }
+
+        $subscription->update([
+            'plan_name' => $planName,
+            'status' => 'active',
+            'price' => $payment->amount,
+            'period' => $daysToAdd >= 365 ? 'yearly' : 'monthly',
+            'start_date' => $subscription->start_date ?: Carbon::now(),
+            'end_date' => $startDate->copy()->addDays($daysToAdd),
+            'next_billing_date' => $startDate->copy()->addDays($daysToAdd),
+        ]);
+    }
+
+    private function extractPlanMeta(SubscriptionPayment $payment): array
+    {
+        $notes = $payment->notes;
+        if (is_string($notes)) {
+            $decoded = json_decode($notes, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                return $decoded;
+            }
+        }
+
+        return [
+            'duration_in_days' => ((float)$payment->amount >= 1000000) ? 365 : 30,
+            'plan_slug' => ((float)$payment->amount >= 1000000) ? 'yearly' : 'monthly',
+            'plan_name' => ((float)$payment->amount >= 1000000) ? 'Yearly' : 'Monthly',
+        ];
+    }
+}

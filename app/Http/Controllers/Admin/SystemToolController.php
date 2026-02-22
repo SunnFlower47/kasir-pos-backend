@@ -58,18 +58,24 @@ class SystemToolController extends Controller
     {
         // Check current status
         $isDown = app()->isDownForMaintenance();
-        
+
         try {
             if ($isDown) {
                 Artisan::call('up');
                 $message = 'Application is now LIVE.';
             } else {
-                // Use a secret to allow admin access if needed, but for now simple down
+                $maintenanceSecret = config('app.maintenance_secret');
+
+                if (empty($maintenanceSecret)) {
+                    return back()->with('error', 'MAINTENANCE_SECRET belum dikonfigurasi. Set dulu di environment untuk keamanan.');
+                }
+
                 Artisan::call('down', [
-                    '--secret' => 'admin-access-secret' 
+                    '--secret' => $maintenanceSecret,
                 ]);
                 $message = 'Application is now in MAINTENANCE MODE.';
             }
+
             return back()->with('success', $message);
         } catch (\Exception $e) {
             return back()->with('error', 'Failed to toggle maintenance: ' . $e->getMessage());
