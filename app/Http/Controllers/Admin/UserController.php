@@ -53,14 +53,14 @@ class UserController extends Controller
      */
     public function edit(User $user)
     {
-        // We can edit System users fully.
-        // For Tenant users, we should be careful. Maybe only specific fields?
-        // But System Admin implies Root access, so generally full edit is allowed but warned.
-        
-        $roles = Role::all(); // Global roles
-        
-        // If editing a tenant user, maybe show explanation that they are managed by tenant?
-        // But for support reasons, we allow editing.
+        // Guard-aware role list to prevent assigning wrong-guard roles
+        if ($user->tenant_id) {
+            // Tenant users should use API/auth roles (sanctum)
+            $roles = Role::where('guard_name', 'sanctum')->orderBy('name')->get();
+        } else {
+            // System users in admin panel should use web guard roles
+            $roles = Role::where('guard_name', 'web')->orderBy('name')->get();
+        }
 
         return view('admin.users.edit', compact('user', 'roles'));
     }
@@ -78,13 +78,26 @@ class UserController extends Controller
             'role' => 'nullable|string|exists:roles,name',
         ]);
 
-        // Security: Prevent assigning System Role to Tenant User
+        // Guard-aware target role resolution
         $roleName = $request->input('role');
-        if ($roleName && $user->tenant_id) {
-             $targetRole = Role::where('name', $roleName)->first();
-             if ($targetRole && $targetRole->scope === 'system') {
-                 return back()->with('error', 'Cannot assign System Role to a Tenant User.');
-             }
+        $targetRole = null;
+
+        if ($roleName) {
+            $expectedGuard = $user->tenant_id ? 'sanctum' : 'web';
+            $targetRole = Role::where('name', $roleName)
+                ->where('guard_name', $expectedGuard)
+                ->first();
+
+            if (!$targetRole) {
+                return back()->withErrors([
+                    'role' => "Role '{$roleName}' tidak tersedia untuk guard '{$expectedGuard}'."
+                ])->withInput();
+            }
+
+            // Extra safety: Prevent assigning system-scoped role to tenant user
+            if ($user->tenant_id && isset($targetRole->scope) && $targetRole->scope === 'system') {
+                return back()->with('error', 'Cannot assign System Role to a Tenant User.');
+            }
         }
 
         $data = [
@@ -99,8 +112,9 @@ class UserController extends Controller
 
         $user->update($data);
 
-        if ($roleName) {
-            $user->syncRoles([$roleName]);
+        if ($targetRole) {
+            // Pass Role model to avoid guard mismatch lookup by name
+            $user->syncRoles([$targetRole]);
         }
 
         AuditLog::createLog('App\Models\User', $user->id, 'update_by_admin', null, $data);

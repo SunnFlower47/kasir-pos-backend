@@ -12,8 +12,10 @@ use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -25,7 +27,7 @@ class AuthController extends Controller
         $request->validate([
             'company_name' => 'required|string|max:255',
             'name' => 'required|string|max:255',
-            'email' => 'required|string|email|max:255|unique:users',
+            'email' => 'required|string|email|max:255|unique:users,email|unique:tenants,email',
             'password' => 'required|string|min:8|confirmed',
             'phone' => 'nullable|string|max:20',
             'business_type' => 'nullable|string|max:50',
@@ -71,10 +73,34 @@ class AuthController extends Controller
                 ]
             ], 201);
 
-        } catch (\Exception $e) {
+        } catch (QueryException $e) {
+            Log::warning('Register query failed', [
+                'email' => $request->email,
+                'code' => $e->getCode(),
+                'sql_error' => $e->errorInfo[1] ?? null,
+            ]);
+
+            // Do not leak SQL/internal details to client
+            if ((int)($e->errorInfo[1] ?? 0) === 1062) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Email sudah terdaftar. Silakan login atau gunakan email lain.'
+                ], 422);
+            }
+
             return response()->json([
                 'success' => false,
-                'message' => 'Registration failed: ' . $e->getMessage()
+                'message' => 'Registrasi gagal. Silakan coba lagi.'
+            ], 500);
+        } catch (\Throwable $e) {
+            Log::error('Register failed', [
+                'email' => $request->email,
+                'error' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Registrasi gagal. Silakan coba lagi.'
             ], 500);
         }
     }
